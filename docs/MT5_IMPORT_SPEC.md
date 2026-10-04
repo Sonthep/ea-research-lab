@@ -1,0 +1,13 @@
+# MT5 XML import contract
+
+Phase 1 accepts MT5 optimization SpreadsheetML XML with a `Workbook` root and `Row`/`Cell`/`Data` nodes, with or without the standard spreadsheet namespace. `ss:Index` sparse cells are supported. A header row contains `Pass` and at least one `Inp*` input. All input columns are discovered dynamically and must be present in every result row. Header names are unique and nonempty; at most 512 columns, 64 nesting levels and 200,000 result rows are accepted. Multi-sheet exports with matching input headers are supported.
+
+Recognized metrics: Pass, Result, Profit, Expected Payoff, Profit Factor, Recovery Factor, Sharpe Ratio/Sharpe, Custom, Equity DD %, Equity Drawdown %, Trades. Unknown metric columns produce warnings. Empty metrics remain null; malformed numbers, non-finite values and missing inputs reject the import. Negative or fractional trade counts are rejected. Decimal dot/comma and grouped numbers with decimal dots are handled; `1,234` alone is interpreted as decimal comma, not a thousands group. Dynamic input numerics use locale-independent dot notation for reproducible identity.
+
+Metadata can appear as two-cell label/value rows before headers, `Label: value` rows, or supported Workbook attributes. Recognized context: EA, symbol, timeframe/period, date range, broker/server, deposit, leverage, model, optimization method and criterion. `Period` with `TF (YYYY.MM.DD - YYYY.MM.DD)` is expanded. MT5 files vary; absent metadata is warned about rather than fabricated. Optional JSON metadata in the multipart request overrides parsed context. Display source filename is sanitized and no uploaded files are executed or served.
+
+DTD, entities and external references are forbidden with `defusedxml`. The server reads in 1 MB chunks, checks `MAX_UPLOAD_MB`, parses in a worker thread and inserts in one transaction. Malformed structure returns 422; size limit 413; unsupported extension 415; duplicate bytes 409. No partial run is persisted.
+
+Canonicalization includes the **exported** complete input configuration. If an MT5 export omits fixed EA inputs, supply a complete export before relying on the identity. Timeframe normalization applies only to names beginning `InpTF`/`TF` or containing `timeframe`, so generic integer enums are not converted accidentally. Boolean words are normalized case-insensitively; numeric 0/1 stay numeric because they may be enum values. Full SHA-256 is stored; abbreviated IDs are display labels.
+
+Supported examples: `sample-data/mt5-optimization.xml` and the 5,000-row synthetic fixture. CSV, HTML backtests and optimization cache metadata are later work, not Phase 1 import formats.

@@ -1,0 +1,1 @@
+{"name":"ea-research-lab","private":true,"packageManager":"pnpm@10.26.2","scripts":{"dev":"pnpm --filter @ea/web dev","build":"pnpm --filter @ea/web build","typecheck":"pnpm --filter @ea/web typecheck","test:e2e":"pnpm --filter @ea/web test:e2e"}}
