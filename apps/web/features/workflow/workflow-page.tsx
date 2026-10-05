@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
@@ -29,7 +29,16 @@ import {
   TrendingUp,
   RefreshCw,
   ExternalLink,
-  Image as ImageIcon
+  Image as ImageIcon,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Search,
+  X,
+  Filter,
+  RotateCcw,
+  CheckSquare,
+  Square
 } from "lucide-react";
 import { api, jsonBody, number } from "@/lib/api";
 import { useApi } from "@/hooks/use-api";
@@ -44,6 +53,9 @@ import {
 } from "@/lib/mt5";
 import { EquityCurveChart, ParetoFrontierChart, ParameterClusterChart } from "@/components/charts/quant-charts";
 import type { Page, Run, Candidate, CandidateDetail, DiscoveryPreview, Status } from "@/types";
+
+type SortField = "rank" | "setId" | "profitFactor" | "equityDd" | "trades" | "profit";
+type SortOrder = "asc" | "desc";
 
 interface StepDef {
   id: number;
@@ -178,6 +190,15 @@ export function WorkflowPage() {
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [selectedResultIds, setSelectedResultIds] = useState<Set<number>>(new Set());
   const [selectedPreviewId, setSelectedPreviewId] = useState<number | null>(null);
+
+  // Step 2 Sorting and Filtering states
+  const [sortField, setSortField] = useState<SortField>("rank");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterMaxDD, setFilterMaxDD] = useState<number | null>(null);
+  const [filterMinPF, setFilterMinPF] = useState<number | null>(null);
+  const [filterMinTrades, setFilterMinTrades] = useState<number | null>(null);
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
 
   // Real tick input form state for Step 3
   const [realTickProfit, setRealTickProfit] = useState("");
@@ -362,8 +383,127 @@ export function WorkflowPage() {
     ? formatMT5OptimizationInputs(numericParams, activeCandidate.parameters)
     : "";
 
+  // Step 2 Sort & Filter helpers
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortOrder(prev => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      if (field === "equityDd" || field === "rank") {
+        setSortOrder("asc");
+      } else {
+        setSortOrder("desc");
+      }
+    }
+  }
+
+  function resetFilters() {
+    setSearchQuery("");
+    setFilterMaxDD(null);
+    setFilterMinPF(null);
+    setFilterMinTrades(null);
+    setSortField("rank");
+    setSortOrder("asc");
+  }
+
+  function toggleResultSelection(id: number) {
+    setSelectedResultIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAll(items: { id: number }[]) {
+    const allSelected = items.length > 0 && items.every(it => selectedResultIds.has(it.id));
+    if (allSelected) {
+      setSelectedResultIds(prev => {
+        const next = new Set(prev);
+        items.forEach(it => next.delete(it.id));
+        return next;
+      });
+    } else {
+      setSelectedResultIds(prev => {
+        const next = new Set(prev);
+        items.forEach(it => next.add(it.id));
+        return next;
+      });
+    }
+  }
+
+  function renderSortIcon(field: SortField) {
+    if (sortField !== field) {
+      return <ArrowUpDown size={12} className="sort-icon-muted" />;
+    }
+    return sortOrder === "asc" ? (
+      <ArrowUp size={12} className="sort-icon-active" />
+    ) : (
+      <ArrowDown size={12} className="sort-icon-active" />
+    );
+  }
+
+  const activeFilterCount = (filterMaxDD !== null ? 1 : 0) +
+    (filterMinPF !== null ? 1 : 0) +
+    (filterMinTrades !== null ? 1 : 0);
+
+  const filteredPreviewItems = useMemo(() => {
+    if (!discoveryPreview?.items) return [];
+
+    let list = [...discoveryPreview.items];
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(item => {
+        const matchSetId = item.stable_set_id?.toLowerCase().includes(q);
+        const matchPass = item.mt5_pass ? String(item.mt5_pass).toLowerCase().includes(q) : false;
+        const matchHash = item.full_hash?.toLowerCase().includes(q);
+        return matchSetId || matchPass || matchHash;
+      });
+    }
+
+    if (filterMaxDD !== null) {
+      list = list.filter(item => (item.equity_dd ?? 999) <= filterMaxDD);
+    }
+
+    if (filterMinPF !== null) {
+      list = list.filter(item => (item.profit_factor ?? 0) >= filterMinPF);
+    }
+
+    if (filterMinTrades !== null) {
+      list = list.filter(item => (item.trades ?? 0) >= filterMinTrades);
+    }
+
+    list.sort((a, b) => {
+      let diff = 0;
+      if (sortField === "rank") {
+        diff = (a.discovery_rank ?? 0) - (b.discovery_rank ?? 0);
+      } else if (sortField === "setId") {
+        diff = (a.stable_set_id || "").localeCompare(b.stable_set_id || "");
+      } else if (sortField === "profitFactor") {
+        diff = (a.profit_factor ?? 0) - (b.profit_factor ?? 0);
+      } else if (sortField === "equityDd") {
+        diff = (a.equity_dd ?? 0) - (b.equity_dd ?? 0);
+      } else if (sortField === "trades") {
+        diff = (a.trades ?? 0) - (b.trades ?? 0);
+      } else if (sortField === "profit") {
+        diff = (a.profit ?? 0) - (b.profit ?? 0);
+      }
+      return sortOrder === "asc" ? diff : -diff;
+    });
+
+    return list;
+  }, [discoveryPreview, searchQuery, filterMaxDD, filterMinPF, filterMinTrades, sortField, sortOrder]);
+
   // Active Candidate or Step 2 Preview Candidate for MT5 handshake
-  const selectedPreviewItem = discoveryPreview?.items.find(r => r.id === selectedPreviewId) || discoveryPreview?.items[0];
+  const selectedPreviewItem =
+    filteredPreviewItems.find(r => r.id === selectedPreviewId) ||
+    filteredPreviewItems[0] ||
+    discoveryPreview?.items.find(r => r.id === selectedPreviewId) ||
+    discoveryPreview?.items[0];
   const currentActiveParams = activeCandidate?.parameters || selectedPreviewItem?.parameters;
   const currentActiveSetId = activeCandidate?.baseline.stable_set_id || selectedPreviewItem?.stable_set_id;
   const currentActiveEAName = activeCandidate?.run.ea_name || activeRun?.ea_name || "Expert Advisor";
@@ -794,12 +934,30 @@ export function WorkflowPage() {
                           <span className="preset-name">Top 10 Candidates</span>
                           <span className="preset-pill muted">กว้าง</span>
                         </button>
+                        <button
+                          type="button"
+                          className={`preset-btn ${discoveryCount === 20 ? "active" : ""}`}
+                          disabled={discoveryBusy}
+                          onClick={() => runQuickDiscovery(20)}
+                        >
+                          <span className="preset-name">Top 20 Candidates</span>
+                          <span className="preset-pill muted">สำรวจลึก</span>
+                        </button>
                       </div>
                     </div>
 
                     <ParetoFrontierChart
                       candidates={
-                        discoveryPreview?.items?.length
+                        filteredPreviewItems.length
+                          ? filteredPreviewItems.map(r => ({
+                              id: r.id,
+                              stable_set_id: r.stable_set_id,
+                              profit: r.profit,
+                              equity_dd: r.equity_dd,
+                              profit_factor: r.profit_factor,
+                              trades: r.trades,
+                            }))
+                          : discoveryPreview?.items?.length
                           ? discoveryPreview.items.map(r => ({
                               id: r.id,
                               stable_set_id: r.stable_set_id,
@@ -835,93 +993,346 @@ export function WorkflowPage() {
                           </div>
                           <div className="stat-summary-right">
                             <span className="summary-pill cyan">
-                              แสดงตัวท็อป <b>{discoveryPreview.items.length}</b> อันดับแรก
+                              แสดง <b>{filteredPreviewItems.length}</b> จาก <b>{discoveryPreview.items.length}</b> อันดับแรก
                             </span>
                           </div>
                         </div>
 
+                        {/* Search, Filter & Quick Sort Toolbar */}
+                        <div className="filter-sort-toolbar">
+                          <div className="toolbar-top-row">
+                            <div className="search-box-wrap">
+                              <Search size={14} className="search-box-icon" />
+                              <input
+                                type="text"
+                                placeholder="ค้นหา Set ID หรือ MT5 Pass เช่น set_ หรือ 42..."
+                                value={searchQuery}
+                                onChange={e => setSearchQuery(e.target.value)}
+                                className="filter-search-input"
+                              />
+                              {searchQuery && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSearchQuery("")}
+                                  className="search-clear-btn"
+                                  title="ล้างคำค้นหา"
+                                >
+                                  <X size={12} />
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="toolbar-action-group">
+                              <button
+                                type="button"
+                                className={`filter-toggle-btn ${showFilterPanel ? "active" : ""} ${activeFilterCount > 0 ? "has-filters" : ""}`}
+                                onClick={() => setShowFilterPanel(!showFilterPanel)}
+                              >
+                                <Filter size={13} />
+                                <span>ตัวกรองละเอียด</span>
+                                {activeFilterCount > 0 && (
+                                  <span className="filter-badge-count">{activeFilterCount}</span>
+                                )}
+                              </button>
+
+                              {(activeFilterCount > 0 || searchQuery || sortField !== "rank" || sortOrder !== "asc") && (
+                                <button
+                                  type="button"
+                                  onClick={resetFilters}
+                                  className="filter-reset-btn"
+                                  title="รีเซ็ตการเรียงลำดับและตัวกรองทั้งหมด"
+                                >
+                                  <RotateCcw size={12} />
+                                  <span>รีเซ็ต</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Quick Sort Pills */}
+                          <div className="quick-sort-row">
+                            <span className="quick-sort-label">เรียงลำดับด่วน:</span>
+                            <div className="quick-sort-pills">
+                              <button
+                                type="button"
+                                className={`sort-pill ${sortField === "rank" && sortOrder === "asc" ? "active" : ""}`}
+                                onClick={() => { setSortField("rank"); setSortOrder("asc"); }}
+                              >
+                                ลำดับเดิม (Rank #)
+                              </button>
+                              <button
+                                type="button"
+                                className={`sort-pill ${sortField === "profitFactor" && sortOrder === "desc" ? "active" : ""}`}
+                                onClick={() => { setSortField("profitFactor"); setSortOrder("desc"); }}
+                              >
+                                Profit Factor สูงสุด ↓
+                              </button>
+                              <button
+                                type="button"
+                                className={`sort-pill ${sortField === "equityDd" && sortOrder === "asc" ? "active" : ""}`}
+                                onClick={() => { setSortField("equityDd"); setSortOrder("asc"); }}
+                              >
+                                Drawdown ต่ำสุด ↑
+                              </button>
+                              <button
+                                type="button"
+                                className={`sort-pill ${sortField === "profit" && sortOrder === "desc" ? "active" : ""}`}
+                                onClick={() => { setSortField("profit"); setSortOrder("desc"); }}
+                              >
+                                Net Profit สูงสุด ↓
+                              </button>
+                              <button
+                                type="button"
+                                className={`sort-pill ${sortField === "trades" && sortOrder === "desc" ? "active" : ""}`}
+                                onClick={() => { setSortField("trades"); setSortOrder("desc"); }}
+                              >
+                                Trades มากสุด ↓
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Collapsible Filter Panel */}
+                          {showFilterPanel && (
+                            <div className="advanced-filter-panel">
+                              <div className="filter-grid">
+                                <div className="filter-col">
+                                  <span className="filter-col-title">Max Drawdown (DD)</span>
+                                  <div className="filter-chips">
+                                    {[null, 5, 8, 10, 15].map(val => (
+                                      <button
+                                        key={String(val)}
+                                        type="button"
+                                        className={`filter-chip ${filterMaxDD === val ? "active" : ""}`}
+                                        onClick={() => setFilterMaxDD(val)}
+                                      >
+                                        {val === null ? "ทั้งหมด" : `≤ ${val}%`}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div className="filter-col">
+                                  <span className="filter-col-title">Min Profit Factor (PF)</span>
+                                  <div className="filter-chips">
+                                    {[null, 1.8, 2.0, 2.5, 3.0].map(val => (
+                                      <button
+                                        key={String(val)}
+                                        type="button"
+                                        className={`filter-chip ${filterMinPF === val ? "active" : ""}`}
+                                        onClick={() => setFilterMinPF(val)}
+                                      >
+                                        {val === null ? "ทั้งหมด" : `≥ ${val}`}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div className="filter-col">
+                                  <span className="filter-col-title">Min Trades</span>
+                                  <div className="filter-chips">
+                                    {[null, 50, 100, 150, 200].map(val => (
+                                      <button
+                                        key={String(val)}
+                                        type="button"
+                                        className={`filter-chip ${filterMinTrades === val ? "active" : ""}`}
+                                        onClick={() => setFilterMinTrades(val)}
+                                      >
+                                        {val === null ? "ทั้งหมด" : `≥ ${val}`}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Shortlist Table with Sticky Header and Sort Controls */}
                         <div className="shortlist-table-wrap">
                           <table className="shortlist-table">
                             <thead>
                               <tr>
-                                <th style={{ width: 44, textAlign: "center" }}>#</th>
-                                <th>Candidate Set ID / Pass</th>
-                                <th style={{ textAlign: "right" }}>Profit Factor</th>
-                                <th style={{ textAlign: "right" }}>Drawdown</th>
-                                <th style={{ textAlign: "right" }}>Trades</th>
-                                <th style={{ textAlign: "right" }}>Net Profit</th>
+                                <th style={{ width: 38, textAlign: "center" }}>
+                                  <button
+                                    type="button"
+                                    className="table-check-btn"
+                                    onClick={() => toggleSelectAll(filteredPreviewItems)}
+                                    title="เลือก/ยกเลิกทั้งหมดเพื่อ Shortlist"
+                                  >
+                                    {filteredPreviewItems.length > 0 && filteredPreviewItems.every(r => selectedResultIds.has(r.id)) ? (
+                                      <CheckSquare size={14} className="green" />
+                                    ) : (
+                                      <Square size={14} className="muted" />
+                                    )}
+                                  </button>
+                                </th>
+                                <th
+                                  style={{ width: 54, textAlign: "center" }}
+                                  className="sortable-th"
+                                  onClick={() => handleSort("rank")}
+                                  title="คลิกเพื่อเรียงตามลำดับดั้งเดิม"
+                                >
+                                  <div className="th-sort-wrap center">
+                                    <span>#</span>
+                                    {renderSortIcon("rank")}
+                                  </div>
+                                </th>
+                                <th
+                                  className="sortable-th"
+                                  onClick={() => handleSort("setId")}
+                                  title="คลิกเพื่อเรียงตาม Set ID"
+                                >
+                                  <div className="th-sort-wrap">
+                                    <span>Candidate Set ID / Pass</span>
+                                    {renderSortIcon("setId")}
+                                  </div>
+                                </th>
+                                <th
+                                  style={{ textAlign: "right" }}
+                                  className="sortable-th"
+                                  onClick={() => handleSort("profitFactor")}
+                                  title="คลิกเพื่อเรียงตาม Profit Factor"
+                                >
+                                  <div className="th-sort-wrap right">
+                                    <span>Profit Factor</span>
+                                    {renderSortIcon("profitFactor")}
+                                  </div>
+                                </th>
+                                <th
+                                  style={{ textAlign: "right" }}
+                                  className="sortable-th"
+                                  onClick={() => handleSort("equityDd")}
+                                  title="คลิกเพื่อเรียงตาม Drawdown"
+                                >
+                                  <div className="th-sort-wrap right">
+                                    <span>Drawdown</span>
+                                    {renderSortIcon("equityDd")}
+                                  </div>
+                                </th>
+                                <th
+                                  style={{ textAlign: "right" }}
+                                  className="sortable-th"
+                                  onClick={() => handleSort("trades")}
+                                  title="คลิกเพื่อเรียงตาม Trades"
+                                >
+                                  <div className="th-sort-wrap right">
+                                    <span>Trades</span>
+                                    {renderSortIcon("trades")}
+                                  </div>
+                                </th>
+                                <th
+                                  style={{ textAlign: "right" }}
+                                  className="sortable-th"
+                                  onClick={() => handleSort("profit")}
+                                  title="คลิกเพื่อเรียงตาม Net Profit"
+                                >
+                                  <div className="th-sort-wrap right">
+                                    <span>Net Profit</span>
+                                    {renderSortIcon("profit")}
+                                  </div>
+                                </th>
                                 <th style={{ width: 140, textAlign: "center" }}>Actions</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {discoveryPreview.items.map((row, idx) => {
-                                const isSelected = selectedPreviewId === row.id || (!selectedPreviewId && idx === 0);
-                                return (
-                                  <tr
-                                    key={row.id}
-                                    className={`shortlist-row ${isSelected ? "is-selected" : ""}`}
-                                    onClick={() => setSelectedPreviewId(row.id)}
-                                  >
-                                    <td style={{ textAlign: "center" }}>
-                                      <span className={`rank-badge ${idx === 0 ? "rank-1" : idx === 1 ? "rank-2" : idx === 2 ? "rank-3" : ""}`}>
-                                        #{idx + 1}
-                                      </span>
-                                    </td>
-                                    <td>
-                                      <div className="set-id-cell">
-                                        <code className="table-code font-bold">{row.stable_set_id}</code>
-                                        <small className="muted">MT5 Pass #{row.mt5_pass}</small>
-                                      </div>
-                                    </td>
-                                    <td style={{ textAlign: "right" }} className="cyan mono font-bold">
-                                      {number(row.profit_factor)}
-                                    </td>
-                                    <td style={{ textAlign: "right" }} className="mono">
-                                      {number(row.equity_dd)}%
-                                    </td>
-                                    <td style={{ textAlign: "right" }} className="mono">
-                                      {number(row.trades, 0)}
-                                    </td>
-                                    <td style={{ textAlign: "right" }} className="green mono font-bold">
-                                      ${number(row.profit)}
-                                    </td>
-                                    <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                                      <div className="table-row-actions">
-                                        <Button
-                                          size="sm"
-                                          variant={isSelected ? "default" : "outline"}
-                                          onClick={() => setSelectedPreviewId(row.id)}
-                                          className={`btn-select-cand ${isSelected ? "active" : ""}`}
+                              {filteredPreviewItems.length === 0 ? (
+                                <tr>
+                                  <td colSpan={8} style={{ textAlign: "center", padding: "36px 16px" }}>
+                                    <div className="table-empty-filtered">
+                                      <AlertTriangle size={24} className="muted" />
+                                      <b>ไม่พบ Candidate ที่ตรงกับเงื่อนไขการค้นหาหรือตัวกรอง</b>
+                                      <p className="muted">ลองเปลี่ยนคำค้นหา หรือผ่อนปรนเกณฑ์ Max Drawdown / Min PF</p>
+                                      <Button size="sm" variant="outline" onClick={resetFilters} style={{ marginTop: 8 }}>
+                                        <RotateCcw size={13} /> ล้างตัวกรองทั้งหมด
+                                      </Button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ) : (
+                                filteredPreviewItems.map((row, idx) => {
+                                  const isSelected = selectedPreviewId === row.id || (!selectedPreviewId && idx === 0);
+                                  const isShortlisted = selectedResultIds.has(row.id);
+                                  return (
+                                    <tr
+                                      key={row.id}
+                                      className={`shortlist-row ${isSelected ? "is-selected" : ""}`}
+                                      onClick={() => setSelectedPreviewId(row.id)}
+                                    >
+                                      <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                                        <button
+                                          type="button"
+                                          className="table-check-btn"
+                                          onClick={() => toggleResultSelection(row.id)}
+                                          title="เลือก/ยกเลิกเพื่อบันทึก Shortlist"
                                         >
-                                          {isSelected ? "✓ เลือกอยู่" : "เลือกตัวนี้"}
-                                        </Button>
-                                        <Button
-                                          size="sm"
-                                          variant="ghost"
-                                          title="ดาวน์โหลด .set สำหรับ MT5"
-                                          onClick={() => downloadSetFile(
-                                            row.parameters,
-                                            `${row.stable_set_id}_${activeRun?.ea_name || "EA"}`
+                                          {isShortlisted ? (
+                                            <CheckSquare size={15} className="green" />
+                                          ) : (
+                                            <Square size={15} className="muted" />
                                           )}
-                                        >
-                                          <Download size={13} />
-                                        </Button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
+                                        </button>
+                                      </td>
+                                      <td style={{ textAlign: "center" }}>
+                                        <span className={`rank-badge ${row.discovery_rank === 1 ? "rank-1" : row.discovery_rank === 2 ? "rank-2" : row.discovery_rank === 3 ? "rank-3" : ""}`}>
+                                          #{row.discovery_rank ?? idx + 1}
+                                        </span>
+                                      </td>
+                                      <td>
+                                        <div className="set-id-cell">
+                                          <code className="table-code font-bold">{row.stable_set_id}</code>
+                                          <small className="muted">MT5 Pass #{row.mt5_pass}</small>
+                                        </div>
+                                      </td>
+                                      <td style={{ textAlign: "right" }} className="cyan mono font-bold">
+                                        {number(row.profit_factor)}
+                                      </td>
+                                      <td style={{ textAlign: "right" }} className="mono">
+                                        {number(row.equity_dd)}%
+                                      </td>
+                                      <td style={{ textAlign: "right" }} className="mono">
+                                        {number(row.trades, 0)}
+                                      </td>
+                                      <td style={{ textAlign: "right" }} className="green mono font-bold">
+                                        ${number(row.profit)}
+                                      </td>
+                                      <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                                        <div className="table-row-actions">
+                                          <Button
+                                            size="sm"
+                                            variant={isSelected ? "default" : "outline"}
+                                            onClick={() => setSelectedPreviewId(row.id)}
+                                            className={`btn-select-cand ${isSelected ? "active" : ""}`}
+                                          >
+                                            {isSelected ? "✓ เลือกอยู่" : "เลือกตัวนี้"}
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            title="ดาวน์โหลด .set สำหรับ MT5"
+                                            onClick={() => downloadSetFile(
+                                              row.parameters,
+                                              `${row.stable_set_id}_${activeRun?.ea_name || "EA"}`
+                                            )}
+                                          >
+                                            <Download size={13} />
+                                          </Button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
                             </tbody>
                           </table>
                         </div>
 
                         <div className="action-button-row">
                           <Button
-                            disabled={discoveryBusy}
+                            disabled={discoveryBusy || selectedResultIds.size === 0}
                             onClick={promoteShortlist}
                             className="btn-promote-primary"
                           >
-                            {discoveryBusy ? "กำลังบันทึก..." : `✅ บันทึก Shortlist ${discoveryPreview.items.length} ตัว และไปทดสอบ Real Tick`}
+                            {discoveryBusy ? "กำลังบันทึก..." : `✅ บันทึก Shortlist (${selectedResultIds.size} ตัวที่เลือก) และไปทดสอบ Real Tick`}
                           </Button>
                           <Button variant="outline" onClick={() => changeStep(3)}>
                             ไป Step 3: Every Tick <ArrowRight size={15} />
