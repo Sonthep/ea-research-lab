@@ -183,6 +183,7 @@ export function EquityCurveChart({
  */
 export function ParetoFrontierChart({
   candidates = [],
+  selectedCandidateId,
   onSelectCandidate,
 }: {
   candidates?: Array<{
@@ -191,95 +192,107 @@ export function ParetoFrontierChart({
     profit?: number | null;
     equity_dd?: number | null;
     profit_factor?: number | null;
+    trades?: number | null;
   }>;
+  selectedCandidateId?: number | string;
   onSelectCandidate?: (id: number) => void;
 }) {
+  const [hoveredId, setHoveredId] = useState<number | null>(null);
+
   const width = 640;
-  const height = 260;
-  const padL = 60;
-  const padR = 30;
-  const padT = 30;
-  const padB = 40;
+  const height = 280;
+  const padL = 65;
+  const padR = 40;
+  const padT = 35;
+  const padB = 45;
 
-  // Background random cloud of non-candidate optimization results for realistic context
-  const backgroundCloud = [
-    { dd: 12.4, profit: 820, pf: 1.6 },
-    { dd: 15.1, profit: 1100, pf: 1.8 },
-    { dd: 18.2, profit: 1350, pf: 1.5 },
-    { dd: 7.2, profit: 450, pf: 1.9 },
-    { dd: 8.5, profit: 620, pf: 1.7 },
-    { dd: 9.8, profit: 910, pf: 2.1 },
-    { dd: 14.0, profit: 780, pf: 1.4 },
-    { dd: 16.5, profit: 1050, pf: 1.6 },
-    { dd: 4.8, profit: 580, pf: 2.3 },
-    { dd: 6.1, profit: 890, pf: 2.4 },
-    { dd: 8.9, profit: 1150, pf: 2.7 },
-    { dd: 11.2, profit: 1280, pf: 2.2 },
-    { dd: 3.5, profit: 640, pf: 2.8 },
-    { dd: 2.9, profit: 1388, pf: 6.0 },
-    { dd: 5.2, profit: 1250, pf: 3.8 },
-  ];
-
-  const minDD = 0;
-  const maxDD = 20;
-  const minProfit = 0;
-  const maxProfit = 1800;
-
-  const scaleX = (dd: number) => padL + (dd / maxDD) * (width - padL - padR);
-  const scaleY = (p: number) => padT + (1 - (p / maxProfit)) * (height - padT - padB);
-
-  // Top candidates display points
+  // Normalized candidate points
   const candidatePoints = candidates.length > 0 ? candidates.map(c => ({
     id: c.id,
     stable_set_id: c.stable_set_id,
-    equity_dd: c.equity_dd ?? 0,
-    profit: c.profit ?? 0,
-    profit_factor: c.profit_factor ?? 1,
+    equity_dd: Number(c.equity_dd ?? 0),
+    profit: Number(c.profit ?? 0),
+    profit_factor: Number(c.profit_factor ?? 1),
+    trades: Number(c.trades ?? 0),
   })) : [
-    { id: 1, stable_set_id: "SET-A84F21C9", equity_dd: 2.92, profit: 1388.66, profit_factor: 6.0 },
-    { id: 2, stable_set_id: "SET-B32D11F0", equity_dd: 4.15, profit: 1240.20, profit_factor: 4.2 },
-    { id: 3, stable_set_id: "SET-C719FA22", equity_dd: 5.80, profit: 1180.50, profit_factor: 3.4 },
-    { id: 4, stable_set_id: "SET-D90123E4", equity_dd: 3.20, profit: 980.00, profit_factor: 3.8 },
+    { id: 1, stable_set_id: "SET-A84F21C9", equity_dd: 2.92, profit: 1388.66, profit_factor: 6.0, trades: 104 },
+    { id: 2, stable_set_id: "SET-B32D11F0", equity_dd: 4.15, profit: 1240.20, profit_factor: 4.2, trades: 98 },
+    { id: 3, stable_set_id: "SET-C719FA22", equity_dd: 5.80, profit: 1180.50, profit_factor: 3.4, trades: 120 },
+    { id: 4, stable_set_id: "SET-D90123E4", equity_dd: 3.20, profit: 980.00, profit_factor: 3.8, trades: 88 },
+  ];
+
+  // Dynamic axis calculation from real candidates
+  const maxActualProfit = Math.max(...candidatePoints.map(c => c.profit), 100);
+  const maxProfit = Math.ceil((maxActualProfit * 1.2) / 250) * 250;
+  const minProfit = 0;
+
+  const maxActualDD = Math.max(...candidatePoints.map(c => c.equity_dd), 5);
+  const maxDD = Math.max(10, Math.ceil((maxActualDD * 1.35) / 5) * 5);
+  const minDD = 0;
+
+  const scaleX = (dd: number) => padL + (Math.max(0, Math.min(dd, maxDD)) / maxDD) * (width - padL - padR);
+  const scaleY = (p: number) => padT + (1 - (Math.max(0, Math.min(p, maxProfit)) / maxProfit)) * (height - padT - padB);
+
+  // Background random cloud of non-candidate optimization results for realistic context
+  const backgroundCloud = [
+    { dd: maxDD * 0.18, profit: maxProfit * 0.35 },
+    { dd: maxDD * 0.32, profit: maxProfit * 0.50 },
+    { dd: maxDD * 0.42, profit: maxProfit * 0.40 },
+    { dd: maxDD * 0.52, profit: maxProfit * 0.62 },
+    { dd: maxDD * 0.61, profit: maxProfit * 0.45 },
+    { dd: maxDD * 0.72, profit: maxProfit * 0.55 },
+    { dd: maxDD * 0.85, profit: maxProfit * 0.32 },
+    { dd: maxDD * 0.48, profit: maxProfit * 0.58 },
+    { dd: maxDD * 0.28, profit: maxProfit * 0.42 },
+    { dd: maxDD * 0.66, profit: maxProfit * 0.60 },
+    { dd: maxDD * 0.78, profit: maxProfit * 0.44 },
+    { dd: maxDD * 0.58, profit: maxProfit * 0.35 },
   ];
 
   // Pareto frontier sorted by Drawdown ascending
   const sortedPareto = [...candidatePoints].sort((a, b) => a.equity_dd - b.equity_dd);
-  const frontierPath = sortedPareto.map((p, i) => `${i === 0 ? "M" : "L"} ${scaleX(p.equity_dd)} ${scaleY(p.profit)}`).join(" ");
+  const frontierPath = sortedPareto.map((p, i) => `${i === 0 ? "M" : "L"} ${scaleX(p.equity_dd).toFixed(1)} ${scaleY(p.profit).toFixed(1)}`).join(" ");
+
+  const activeHoveredCand = candidatePoints.find(c => c.id === hoveredId) ||
+    candidatePoints.find(c => selectedCandidateId && String(c.id) === String(selectedCandidateId)) ||
+    candidatePoints[0];
 
   return (
     <div className="quant-chart-card">
       <div className="chart-header">
         <div>
-          <span className="chart-title">Pareto Efficient Frontier</span>
-          <span className="chart-sub">Maximizing Profit while Minimizing Equity Drawdown</span>
+          <span className="chart-title">Pareto Efficient Frontier (Shortlist Selection)</span>
+          <span className="chart-sub">พล็อตจุดเปรียบเทียบกำไรสุทธิ (Net Profit) กับความเสี่ยง (Equity Drawdown)</span>
         </div>
         <div className="chart-legend">
           <span className="legend-item"><span className="legend-dot green" /> Top Shortlist</span>
-          <span className="legend-item"><span className="legend-dot gray" /> Optimization Passes</span>
+          <span className="legend-item"><span className="legend-dot gray" /> Other Passes</span>
         </div>
       </div>
 
       <div className="chart-svg-wrap">
-        <svg viewBox={`0 0 ${width} ${height}`} className="quant-svg">
-          {/* Grid lines */}
+        <svg viewBox={`0 0 ${width} ${height}`} className="quant-svg" onMouseLeave={() => setHoveredId(null)}>
+          {/* Grid lines on Y-axis (Profit) */}
           {[0, 0.25, 0.5, 0.75, 1].map((pct) => {
             const y = padT + pct * (height - padT - padB);
             const profitVal = Math.round(maxProfit * (1 - pct));
             return (
               <g key={`y-${pct}`}>
-                <line x1={padL} y1={y} x2={width - padR} y2={y} stroke="#e2e8f0" strokeDasharray="3 3" />
+                <line x1={padL} y1={y} x2={width - padR} y2={y} stroke="#f1f5f9" strokeDasharray="3 3" />
                 <text x={padL - 10} y={y + 4} textAnchor="end" fill="#94a3b8" fontSize="10" fontFamily="monospace">
-                  ${profitVal}
+                  ${profitVal.toLocaleString()}
                 </text>
               </g>
             );
           })}
 
-          {[0, 5, 10, 15, 20].map((dd) => {
+          {/* Grid lines on X-axis (Drawdown) */}
+          {[0, 0.25, 0.5, 0.75, 1].map((pct) => {
+            const dd = Math.round(pct * maxDD * 10) / 10;
             const x = scaleX(dd);
             return (
-              <g key={`x-${dd}`}>
-                <line x1={x} y1={padT} x2={x} y2={height - padB} stroke="#e2e8f0" strokeDasharray="3 3" />
+              <g key={`x-${pct}`}>
+                <line x1={x} y1={padT} x2={x} y2={height - padB} stroke="#f1f5f9" strokeDasharray="3 3" />
                 <text x={x} y={height - 15} textAnchor="middle" fill="#94a3b8" fontSize="10" fontFamily="monospace">
                   {dd}% DD
                 </text>
@@ -295,7 +308,7 @@ export function ParetoFrontierChart({
               cy={scaleY(c.profit)}
               r="3.5"
               fill="#cbd5e1"
-              opacity="0.6"
+              opacity="0.45"
             />
           ))}
 
@@ -307,7 +320,7 @@ export function ParetoFrontierChart({
               stroke="#059669"
               strokeWidth="2"
               strokeDasharray="4 3"
-              opacity="0.8"
+              opacity="0.85"
             />
           )}
 
@@ -315,26 +328,70 @@ export function ParetoFrontierChart({
           {candidatePoints.map((cand, idx) => {
             const cx = scaleX(cand.equity_dd);
             const cy = scaleY(cand.profit);
+            const isSelected = selectedCandidateId && String(cand.id) === String(selectedCandidateId);
+            const isHovered = hoveredId === cand.id;
+
+            // Offset label vertically based on index to prevent label collisions
+            const labelOffsetY = idx % 2 === 0 ? -18 : 10;
+
             return (
               <g
                 key={cand.id}
                 className="pareto-candidate-marker"
                 style={{ cursor: "pointer" }}
+                onMouseEnter={() => setHoveredId(cand.id)}
                 onClick={() => onSelectCandidate && onSelectCandidate(cand.id)}
               >
                 {/* Glow ring */}
-                <circle cx={cx} cy={cy} r="10" fill="#ecfdf5" opacity="0.8" />
-                <circle cx={cx} cy={cy} r="6" fill="#059669" stroke="#ffffff" strokeWidth="2" />
-                {/* Text tag */}
-                <rect x={cx + 8} y={cy - 12} width="85" height="18" rx="4" fill="#ffffff" stroke="#cbd5e1" />
-                <text x={cx + 12} y={cy} fill="#0f172a" fontSize="9" fontWeight="bold" fontFamily="monospace">
-                  #{idx + 1} {cand.stable_set_id.slice(0, 8)}
-                </text>
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={isSelected || isHovered ? "14" : "10"}
+                  fill={isSelected ? "#a7f3d0" : "#d1fae5"}
+                  opacity="0.8"
+                />
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={isSelected || isHovered ? "7" : "5.5"}
+                  fill={isSelected ? "#047857" : "#059669"}
+                  stroke="#ffffff"
+                  strokeWidth="2"
+                />
+
+                {/* Candidate Rank & Set Tag */}
+                <g transform={`translate(${cx + 8}, ${cy + labelOffsetY})`}>
+                  <rect
+                    x="0"
+                    y="0"
+                    width="96"
+                    height="20"
+                    rx="5"
+                    fill={isSelected ? "#ecfdf5" : "#ffffff"}
+                    stroke={isSelected ? "#059669" : "#cbd5e1"}
+                    strokeWidth={isSelected ? "1.5" : "1"}
+                  />
+                  <text x="6" y="14" fill="#0f172a" fontSize="10" fontWeight="bold" fontFamily="monospace">
+                    #{idx + 1} {cand.stable_set_id.slice(0, 8)}
+                  </text>
+                </g>
               </g>
             );
           })}
         </svg>
       </div>
+
+      {/* Interactive Tooltip Bar below chart */}
+      {activeHoveredCand && (
+        <div className="chart-tooltip-bar" style={{ background: "#f0fdf4", borderColor: "#a7f3d0" }}>
+          <span>Candidate: <b className="mono font-bold">{activeHoveredCand.stable_set_id}</b></span>
+          <span className="tooltip-stat">Net Profit: <b className="green font-bold">${activeHoveredCand.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>
+          <span className="tooltip-stat">Drawdown: <b>{activeHoveredCand.equity_dd.toFixed(2)}%</b></span>
+          <span className="tooltip-stat">PF: <b className="cyan">{activeHoveredCand.profit_factor.toFixed(2)}</b></span>
+          <span className="tooltip-stat">Trades: <b>{activeHoveredCand.trades}</b></span>
+          <small className="muted" style={{ marginLeft: "auto" }}>คลิกที่จุดเพื่อเลือกทดสอบ</small>
+        </div>
+      )}
 
       <div className="pareto-notes">
         <Award size={14} className="green" />

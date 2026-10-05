@@ -177,6 +177,7 @@ export function WorkflowPage() {
   const [discoveryPreview, setDiscoveryPreview] = useState<DiscoveryPreview>();
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [selectedResultIds, setSelectedResultIds] = useState<Set<number>>(new Set());
+  const [selectedPreviewId, setSelectedPreviewId] = useState<number | null>(null);
 
   // Real tick input form state for Step 3
   const [realTickProfit, setRealTickProfit] = useState("");
@@ -251,6 +252,9 @@ export function WorkflowPage() {
       }));
       setDiscoveryPreview(data);
       setSelectedResultIds(new Set(data.items.map(r => r.id)));
+      if (data.items.length > 0) {
+        setSelectedPreviewId(data.items[0].id);
+      }
     } catch (e) {
       setActionError((e as Error).message);
     } finally {
@@ -357,6 +361,17 @@ export function WorkflowPage() {
   const mt5RangeInputsString = activeCandidate
     ? formatMT5OptimizationInputs(numericParams, activeCandidate.parameters)
     : "";
+
+  // Active Candidate or Step 2 Preview Candidate for MT5 handshake
+  const selectedPreviewItem = discoveryPreview?.items.find(r => r.id === selectedPreviewId) || discoveryPreview?.items[0];
+  const currentActiveParams = activeCandidate?.parameters || selectedPreviewItem?.parameters;
+  const currentActiveSetId = activeCandidate?.baseline.stable_set_id || selectedPreviewItem?.stable_set_id;
+  const currentActiveEAName = activeCandidate?.run.ea_name || activeRun?.ea_name || "Expert Advisor";
+  const currentActiveSymbol = activeCandidate?.run.symbol || activeRun?.symbol || "Symbol";
+  const currentActiveTimeframe = activeCandidate?.run.timeframe || activeRun?.timeframe || "M1";
+  const currentActivePF = activeCandidate?.baseline.profit_factor ?? selectedPreviewItem?.profit_factor;
+  const currentActiveDD = activeCandidate?.baseline.equity_dd ?? selectedPreviewItem?.equity_dd;
+  const currentActiveProfit = activeCandidate?.baseline.profit ?? selectedPreviewItem?.profit;
 
   return (
     <div className="quant-workflow-wrapper">
@@ -569,7 +584,7 @@ export function WorkflowPage() {
                     <span className="num-dot">1</span>
                     <div>
                       <b>เปิด MT5 Strategy Tester (Ctrl + R)</b>
-                      <p>เลือก Expert Advisor: <code className="terminal-code">{activeRun?.ea_name || "EA Name"}</code></p>
+                      <p>เลือก Expert Advisor: <code className="terminal-code">{currentActiveEAName}</code></p>
                     </div>
                   </div>
 
@@ -578,8 +593,8 @@ export function WorkflowPage() {
                     <div>
                       <b>ตั้งค่าโหมดการทดสอบใน MT5:</b>
                       <div className="setting-tag-group">
-                        <span className="setting-tag">Symbol: <b>{activeRun?.symbol || "XAUUSD"}</b></span>
-                        <span className="setting-tag">Timeframe: <b>{activeRun?.timeframe || "M1"}</b></span>
+                        <span className="setting-tag">Symbol: <b>{currentActiveSymbol}</b></span>
+                        <span className="setting-tag">Timeframe: <b>{currentActiveTimeframe}</b></span>
                         <span className="setting-tag">
                           Model: <b>
                             {activeStep === 1 ? "1 minute OHLC" :
@@ -602,44 +617,67 @@ export function WorkflowPage() {
                     <div>
                       <b>ใส่ค่าพารามิเตอร์ของ Candidate:</b>
                       <p>กดปุ่มด้านล่างเพื่อโหลดค่าเข้า MT5 Strategy Tester ทันที ไม่ต้องพิมพ์เอง</p>
-                      {activeCandidate ? (
-                        <div className="mt5-quick-actions">
-                          <Button
-                            size="sm"
-                            onClick={() => handleCopy(
-                              formatSetFileContent(activeCandidate.parameters, {
-                                setId: activeCandidate.baseline.stable_set_id,
-                                eaName: activeCandidate.run.ea_name,
-                                symbol: activeCandidate.run.symbol || undefined
-                              }),
-                              "mt5_params"
-                            )}
-                          >
-                            <Copy size={14} />
-                            {copiedText === "mt5_params" ? "คัดลอกแล้ว!" : "Copy All Params"}
-                          </Button>
+                      {currentActiveParams ? (
+                        <div className="mt5-candidate-selected-card">
+                          <div className="selected-card-header">
+                            <span className="selected-badge">ACTIVE SHORTLIST</span>
+                            <b className="mono font-bold">{currentActiveSetId}</b>
+                          </div>
+                          <div className="selected-card-stats">
+                            <span>PF: <b className="cyan mono font-bold">{number(currentActivePF)}</b></span>
+                            <span>DD: <b className="mono font-bold">{number(currentActiveDD)}%</b></span>
+                            <span>Profit: <b className="green mono font-bold">${number(currentActiveProfit)}</b></span>
+                          </div>
+                          <div className="mt5-quick-actions">
+                            <Button
+                              size="sm"
+                              onClick={() => handleCopy(
+                                formatSetFileContent(currentActiveParams, {
+                                  setId: currentActiveSetId,
+                                  eaName: currentActiveEAName,
+                                  symbol: currentActiveSymbol || undefined
+                                }),
+                                "mt5_params"
+                              )}
+                            >
+                              <Copy size={14} />
+                              {copiedText === "mt5_params" ? "คัดลอกแล้ว!" : "Copy All Params"}
+                            </Button>
 
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => downloadSetFile(
-                              activeCandidate.parameters,
-                              `${activeCandidate.baseline.stable_set_id}_${activeCandidate.run.ea_name}`,
-                              {
-                                setId: activeCandidate.baseline.stable_set_id,
-                                eaName: activeCandidate.run.ea_name,
-                                symbol: activeCandidate.run.symbol || undefined
-                              }
-                            )}
-                          >
-                            <Download size={14} /> Save .set File
-                          </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => downloadSetFile(
+                                currentActiveParams,
+                                `${currentActiveSetId}_${currentActiveEAName}`,
+                                {
+                                  setId: currentActiveSetId,
+                                  eaName: currentActiveEAName,
+                                  symbol: currentActiveSymbol || undefined
+                                }
+                              )}
+                            >
+                              <Download size={14} /> Save .set File
+                            </Button>
+                          </div>
                         </div>
                       ) : (
-                        <small className="muted">กรุณาเลือก Candidate ด้านบน หรือเลือกใน Step 2 ก่อน</small>
+                        <div className="mt5-select-prompt">
+                          <small className="muted">คลิกเลือก Candidate จากตารางในคอลัมน์ขวา หรือเลือกด้านบน</small>
+                        </div>
                       )}
                     </div>
                   </div>
+
+                  {activeStep === 2 && (
+                    <div className="instruction-item highlight">
+                      <span className="num-dot">4</span>
+                      <div>
+                        <b>รัน Single Test ใน MT5 แล้วไปต่อ:</b>
+                        <p>เมื่อรัน Every Tick บน MT5 เสร็จแล้ว กดปุ่ม <b>"บันทึก Shortlist และเริ่มทดสอบ"</b> ด้านล่าง เพื่อไป Step 3</p>
+                      </div>
+                    </div>
+                  )}
 
                   {activeStep === 8 && (
                     <div className="instruction-item highlight">
@@ -715,34 +753,48 @@ export function WorkflowPage() {
                 {activeStep === 2 && (
                   <div className="step-content-pane">
                     <p className="pane-lead">
-                      เลือกตัวท็อป 3–5 ตัวโดยใช้เกณฑ์มาตรฐาน Quant (DD ≤ 10% · PF ≥ 2 · Trades ≥ 100):
+                      คัดกรองตัวท็อป 3–5 ตัวโดยใช้เกณฑ์มาตรฐาน Quant (DD ≤ 10% · PF ≥ 2 · Trades ≥ 100):
                     </p>
 
-                    <div className="quick-filter-presets">
-                      <Button
-                        size="sm"
-                        variant={discoveryCount === 3 ? "default" : "outline"}
-                        disabled={discoveryBusy}
-                        onClick={() => runQuickDiscovery(3)}
-                      >
-                        🎯 ดึง Top 3 Candidates
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={discoveryCount === 5 ? "default" : "outline"}
-                        disabled={discoveryBusy}
-                        onClick={() => runQuickDiscovery(5)}
-                      >
-                        🎯 ดึง Top 5 Candidates
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={discoveryCount === 10 ? "default" : "outline"}
-                        disabled={discoveryBusy}
-                        onClick={() => runQuickDiscovery(10)}
-                      >
-                        Top 10 Candidates
-                      </Button>
+                    <div className="discovery-preset-bar">
+                      <div className="preset-bar-header">
+                        <span className="preset-label">
+                          <Target size={15} className="green" />
+                          <span>เลือกขนาด Candidate Shortlist สำหรับทดสอบ:</span>
+                        </span>
+                        {discoveryBusy && <span className="discovery-spinner">กำลังประมวลผล...</span>}
+                      </div>
+                      <div className="preset-buttons">
+                        <button
+                          type="button"
+                          className={`preset-btn ${discoveryCount === 3 ? "active" : ""}`}
+                          disabled={discoveryBusy}
+                          onClick={() => runQuickDiscovery(3)}
+                        >
+                          <span className="preset-icon">🎯</span>
+                          <span className="preset-name">Top 3 Candidates</span>
+                          <span className="preset-pill">แนะนำ (Focus)</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`preset-btn ${discoveryCount === 5 ? "active" : ""}`}
+                          disabled={discoveryBusy}
+                          onClick={() => runQuickDiscovery(5)}
+                        >
+                          <span className="preset-icon">🎯</span>
+                          <span className="preset-name">Top 5 Candidates</span>
+                          <span className="preset-pill secondary">มาตรฐาน</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`preset-btn ${discoveryCount === 10 ? "active" : ""}`}
+                          disabled={discoveryBusy}
+                          onClick={() => runQuickDiscovery(10)}
+                        >
+                          <span className="preset-name">Top 10 Candidates</span>
+                          <span className="preset-pill muted">กว้าง</span>
+                        </button>
+                      </div>
                     </div>
 
                     <ParetoFrontierChart
@@ -754,6 +806,7 @@ export function WorkflowPage() {
                               profit: r.profit,
                               equity_dd: r.equity_dd,
                               profit_factor: r.profit_factor,
+                              trades: r.trades,
                             }))
                           : candidates.data?.items?.slice(0, 5).map(c => ({
                               id: c.id,
@@ -761,62 +814,114 @@ export function WorkflowPage() {
                               profit: c.baseline.profit,
                               equity_dd: c.baseline.equity_dd,
                               profit_factor: c.baseline.profit_factor,
+                              trades: c.baseline.trades,
                             })) || []
                       }
-                      onSelectCandidate={(id) => setSelectedCandidateId(String(id))}
+                      selectedCandidateId={selectedPreviewId || selectedCandidateId}
+                      onSelectCandidate={(id) => setSelectedPreviewId(id)}
                     />
 
                     {discoveryPreview && (
                       <div className="preview-results-wrap">
                         <div className="preview-stat-summary">
-                          <span>พบผ่านเกณฑ์ทั้งหมด <b>{discoveryPreview.qualifying_sets}</b> Unique Sets</span>
-                          <span>กำลังเลือก <b>{discoveryPreview.items.length}</b> ตัวท็อป</span>
+                          <div className="stat-summary-left">
+                            <span className="summary-pill green">
+                              <CheckCircle2 size={13} />
+                              ผ่านเกณฑ์มาตรฐาน Quant: <b>{discoveryPreview.qualifying_sets.toLocaleString()}</b> Unique Sets
+                            </span>
+                            <span className="summary-sub">
+                              (เกณฑ์ Quant: DD ≤ 10% · PF ≥ 2.0 · Trades ≥ 100)
+                            </span>
+                          </div>
+                          <div className="stat-summary-right">
+                            <span className="summary-pill cyan">
+                              แสดงตัวท็อป <b>{discoveryPreview.items.length}</b> อันดับแรก
+                            </span>
+                          </div>
                         </div>
 
                         <div className="shortlist-table-wrap">
-                          <table>
+                          <table className="shortlist-table">
                             <thead>
                               <tr>
-                                <th>Set ID</th>
-                                <th>PF</th>
-                                <th>DD %</th>
-                                <th>Trades</th>
-                                <th>Net Profit</th>
-                                <th>.set File</th>
+                                <th style={{ width: 44, textAlign: "center" }}>#</th>
+                                <th>Candidate Set ID / Pass</th>
+                                <th style={{ textAlign: "right" }}>Profit Factor</th>
+                                <th style={{ textAlign: "right" }}>Drawdown</th>
+                                <th style={{ textAlign: "right" }}>Trades</th>
+                                <th style={{ textAlign: "right" }}>Net Profit</th>
+                                <th style={{ width: 140, textAlign: "center" }}>Actions</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {discoveryPreview.items.map(row => (
-                                <tr key={row.id}>
-                                  <td>
-                                    <code className="table-code">{row.stable_set_id}</code>
-                                    <small className="muted">MT5 #{row.mt5_pass}</small>
-                                  </td>
-                                  <td className="cyan mono font-bold">{number(row.profit_factor)}</td>
-                                  <td className="mono">{number(row.equity_dd)}%</td>
-                                  <td className="mono">{number(row.trades, 0)}</td>
-                                  <td className="green mono">${number(row.profit)}</td>
-                                  <td>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => downloadSetFile(
-                                        row.parameters,
-                                        `${row.stable_set_id}_${activeRun?.ea_name}`
-                                      )}
-                                    >
-                                      <Download size={13} /> .set
-                                    </Button>
-                                  </td>
-                                </tr>
-                              ))}
+                              {discoveryPreview.items.map((row, idx) => {
+                                const isSelected = selectedPreviewId === row.id || (!selectedPreviewId && idx === 0);
+                                return (
+                                  <tr
+                                    key={row.id}
+                                    className={`shortlist-row ${isSelected ? "is-selected" : ""}`}
+                                    onClick={() => setSelectedPreviewId(row.id)}
+                                  >
+                                    <td style={{ textAlign: "center" }}>
+                                      <span className={`rank-badge ${idx === 0 ? "rank-1" : idx === 1 ? "rank-2" : idx === 2 ? "rank-3" : ""}`}>
+                                        #{idx + 1}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <div className="set-id-cell">
+                                        <code className="table-code font-bold">{row.stable_set_id}</code>
+                                        <small className="muted">MT5 Pass #{row.mt5_pass}</small>
+                                      </div>
+                                    </td>
+                                    <td style={{ textAlign: "right" }} className="cyan mono font-bold">
+                                      {number(row.profit_factor)}
+                                    </td>
+                                    <td style={{ textAlign: "right" }} className="mono">
+                                      {number(row.equity_dd)}%
+                                    </td>
+                                    <td style={{ textAlign: "right" }} className="mono">
+                                      {number(row.trades, 0)}
+                                    </td>
+                                    <td style={{ textAlign: "right" }} className="green mono font-bold">
+                                      ${number(row.profit)}
+                                    </td>
+                                    <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                                      <div className="table-row-actions">
+                                        <Button
+                                          size="sm"
+                                          variant={isSelected ? "default" : "outline"}
+                                          onClick={() => setSelectedPreviewId(row.id)}
+                                          className={`btn-select-cand ${isSelected ? "active" : ""}`}
+                                        >
+                                          {isSelected ? "✓ เลือกอยู่" : "เลือกตัวนี้"}
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          title="ดาวน์โหลด .set สำหรับ MT5"
+                                          onClick={() => downloadSetFile(
+                                            row.parameters,
+                                            `${row.stable_set_id}_${activeRun?.ea_name || "EA"}`
+                                          )}
+                                        >
+                                          <Download size={13} />
+                                        </Button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
 
                         <div className="action-button-row">
-                          <Button disabled={discoveryBusy} onClick={promoteShortlist}>
-                            {discoveryBusy ? "กำลังบันทึก..." : "✅ บันทึก Shortlist และเริ่มทดสอบ"}
+                          <Button
+                            disabled={discoveryBusy}
+                            onClick={promoteShortlist}
+                            className="btn-promote-primary"
+                          >
+                            {discoveryBusy ? "กำลังบันทึก..." : `✅ บันทึก Shortlist ${discoveryPreview.items.length} ตัว และไปทดสอบ Real Tick`}
                           </Button>
                           <Button variant="outline" onClick={() => changeStep(3)}>
                             ไป Step 3: Every Tick <ArrowRight size={15} />
