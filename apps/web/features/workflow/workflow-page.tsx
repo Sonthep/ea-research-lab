@@ -199,6 +199,7 @@ export function WorkflowPage() {
   const [filterMinPF, setFilterMinPF] = useState<number | null>(null);
   const [filterMinTrades, setFilterMinTrades] = useState<number | null>(null);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [step2ViewMode, setStep2ViewMode] = useState<"table" | "chart" | "both">("table");
 
   // Real tick input form state for Step 3
   const [realTickProfit, setRealTickProfit] = useState("");
@@ -282,6 +283,13 @@ export function WorkflowPage() {
       setDiscoveryBusy(false);
     }
   }
+
+  // Auto-run discovery when on Step 2 if not loaded yet
+  useEffect(() => {
+    if (activeStep === 2 && selectedRunId && !discoveryPreview && !discoveryBusy) {
+      runQuickDiscovery(discoveryCount || 5);
+    }
+  }, [activeStep, selectedRunId, discoveryPreview, discoveryBusy, discoveryCount]);
 
   // Promote shortlisted candidates
   async function promoteShortlist() {
@@ -946,398 +954,455 @@ export function WorkflowPage() {
                       </div>
                     </div>
 
-                    <ParetoFrontierChart
-                      candidates={
-                        filteredPreviewItems.length
-                          ? filteredPreviewItems.map(r => ({
-                              id: r.id,
-                              stable_set_id: r.stable_set_id,
-                              profit: r.profit,
-                              equity_dd: r.equity_dd,
-                              profit_factor: r.profit_factor,
-                              trades: r.trades,
-                            }))
-                          : discoveryPreview?.items?.length
-                          ? discoveryPreview.items.map(r => ({
-                              id: r.id,
-                              stable_set_id: r.stable_set_id,
-                              profit: r.profit,
-                              equity_dd: r.equity_dd,
-                              profit_factor: r.profit_factor,
-                              trades: r.trades,
-                            }))
-                          : candidates.data?.items?.slice(0, 5).map(c => ({
-                              id: c.id,
-                              stable_set_id: c.baseline.stable_set_id,
-                              profit: c.baseline.profit,
-                              equity_dd: c.baseline.equity_dd,
-                              profit_factor: c.baseline.profit_factor,
-                              trades: c.baseline.trades,
-                            })) || []
-                      }
-                      selectedCandidateId={selectedPreviewId || selectedCandidateId}
-                      onSelectCandidate={(id) => setSelectedPreviewId(id)}
-                    />
+                    {/* View Mode Switcher: Table & Filter (Default) vs Pareto Chart vs Both */}
+                    <div className="step2-view-switcher">
+                      <button
+                        type="button"
+                        className={`view-tab-btn ${step2ViewMode === "table" ? "active" : ""}`}
+                        onClick={() => setStep2ViewMode("table")}
+                      >
+                        <Sliders size={13} />
+                        <span>📋 ตาราง Shortlist & ตัวกรอง {discoveryPreview?.items?.length ? `(${filteredPreviewItems.length})` : ""}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`view-tab-btn ${step2ViewMode === "chart" ? "active" : ""}`}
+                        onClick={() => setStep2ViewMode("chart")}
+                      >
+                        <TrendingUp size={13} />
+                        <span>📈 กราฟ Pareto Frontier</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`view-tab-btn ${step2ViewMode === "both" ? "active" : ""}`}
+                        onClick={() => setStep2ViewMode("both")}
+                      >
+                        <span>👀 แสดงทั้งคู่ (ตาราง + กราฟ)</span>
+                      </button>
+                    </div>
 
-                    {discoveryPreview && (
-                      <div className="preview-results-wrap">
-                        <div className="preview-stat-summary">
-                          <div className="stat-summary-left">
-                            <span className="summary-pill green">
-                              <CheckCircle2 size={13} />
-                              ผ่านเกณฑ์มาตรฐาน Quant: <b>{discoveryPreview.qualifying_sets.toLocaleString()}</b> Unique Sets
-                            </span>
-                            <span className="summary-sub">
-                              (เกณฑ์ Quant: DD ≤ 10% · PF ≥ 2.0 · Trades ≥ 100)
-                            </span>
-                          </div>
-                          <div className="stat-summary-right">
-                            <span className="summary-pill cyan">
-                              แสดง <b>{filteredPreviewItems.length}</b> จาก <b>{discoveryPreview.items.length}</b> อันดับแรก
-                            </span>
-                          </div>
-                        </div>
+                    {/* Loading State when auto-fetching or switching presets */}
+                    {discoveryBusy && !discoveryPreview && (
+                      <div className="discovery-loading-state">
+                        <RefreshCw size={22} className="spin-animation text-emerald-600" />
+                        <b>กำลังค้นหาและจัดอันดับ Candidates ที่ดีที่สุด...</b>
+                        <span className="muted" style={{ fontSize: 11 }}>กรอง DD ≤ 10% · PF ≥ 2.0 · Trades ≥ 100 อัตโนมัติ</span>
+                      </div>
+                    )}
 
-                        {/* Search, Filter & Quick Sort Toolbar */}
-                        <div className="filter-sort-toolbar">
-                          <div className="toolbar-top-row">
-                            <div className="search-box-wrap">
-                              <Search size={14} className="search-box-icon" />
-                              <input
-                                type="text"
-                                placeholder="ค้นหา Set ID หรือ MT5 Pass เช่น set_ หรือ 42..."
-                                value={searchQuery}
-                                onChange={e => setSearchQuery(e.target.value)}
-                                className="filter-search-input"
-                              />
-                              {searchQuery && (
-                                <button
-                                  type="button"
-                                  onClick={() => setSearchQuery("")}
-                                  className="search-clear-btn"
-                                  title="ล้างคำค้นหา"
-                                >
-                                  <X size={12} />
-                                </button>
-                              )}
-                            </div>
+                    {/* If Chart is selected or Both, show Pareto Chart */}
+                    {(step2ViewMode === "chart" || step2ViewMode === "both") && (
+                      <div className="step2-chart-container" style={{ marginTop: 12 }}>
+                        <ParetoFrontierChart
+                          candidates={
+                            filteredPreviewItems.length
+                              ? filteredPreviewItems.map(r => ({
+                                  id: r.id,
+                                  stable_set_id: r.stable_set_id,
+                                  profit: r.profit,
+                                  equity_dd: r.equity_dd,
+                                  profit_factor: r.profit_factor,
+                                  trades: r.trades,
+                                }))
+                              : discoveryPreview?.items?.length
+                              ? discoveryPreview.items.map(r => ({
+                                  id: r.id,
+                                  stable_set_id: r.stable_set_id,
+                                  profit: r.profit,
+                                  equity_dd: r.equity_dd,
+                                  profit_factor: r.profit_factor,
+                                  trades: r.trades,
+                                }))
+                              : candidates.data?.items?.slice(0, 5).map(c => ({
+                                  id: c.id,
+                                  stable_set_id: c.baseline.stable_set_id,
+                                  profit: c.baseline.profit,
+                                  equity_dd: c.baseline.equity_dd,
+                                  profit_factor: c.baseline.profit_factor,
+                                  trades: c.baseline.trades,
+                                })) || []
+                          }
+                          selectedCandidateId={selectedPreviewId || selectedCandidateId}
+                          onSelectCandidate={(id) => setSelectedPreviewId(id)}
+                        />
+                      </div>
+                    )}
 
-                            <div className="toolbar-action-group">
-                              <button
-                                type="button"
-                                className={`filter-toggle-btn ${showFilterPanel ? "active" : ""} ${activeFilterCount > 0 ? "has-filters" : ""}`}
-                                onClick={() => setShowFilterPanel(!showFilterPanel)}
-                              >
-                                <Filter size={13} />
-                                <span>ตัวกรองละเอียด</span>
-                                {activeFilterCount > 0 && (
-                                  <span className="filter-badge-count">{activeFilterCount}</span>
-                                )}
-                              </button>
-
-                              {(activeFilterCount > 0 || searchQuery || sortField !== "rank" || sortOrder !== "asc") && (
-                                <button
-                                  type="button"
-                                  onClick={resetFilters}
-                                  className="filter-reset-btn"
-                                  title="รีเซ็ตการเรียงลำดับและตัวกรองทั้งหมด"
-                                >
-                                  <RotateCcw size={12} />
-                                  <span>รีเซ็ต</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Quick Sort Pills */}
-                          <div className="quick-sort-row">
-                            <span className="quick-sort-label">เรียงลำดับด่วน:</span>
-                            <div className="quick-sort-pills">
-                              <button
-                                type="button"
-                                className={`sort-pill ${sortField === "rank" && sortOrder === "asc" ? "active" : ""}`}
-                                onClick={() => { setSortField("rank"); setSortOrder("asc"); }}
-                              >
-                                ลำดับเดิม (Rank #)
-                              </button>
-                              <button
-                                type="button"
-                                className={`sort-pill ${sortField === "profitFactor" && sortOrder === "desc" ? "active" : ""}`}
-                                onClick={() => { setSortField("profitFactor"); setSortOrder("desc"); }}
-                              >
-                                Profit Factor สูงสุด ↓
-                              </button>
-                              <button
-                                type="button"
-                                className={`sort-pill ${sortField === "equityDd" && sortOrder === "asc" ? "active" : ""}`}
-                                onClick={() => { setSortField("equityDd"); setSortOrder("asc"); }}
-                              >
-                                Drawdown ต่ำสุด ↑
-                              </button>
-                              <button
-                                type="button"
-                                className={`sort-pill ${sortField === "profit" && sortOrder === "desc" ? "active" : ""}`}
-                                onClick={() => { setSortField("profit"); setSortOrder("desc"); }}
-                              >
-                                Net Profit สูงสุด ↓
-                              </button>
-                              <button
-                                type="button"
-                                className={`sort-pill ${sortField === "trades" && sortOrder === "desc" ? "active" : ""}`}
-                                onClick={() => { setSortField("trades"); setSortOrder("desc"); }}
-                              >
-                                Trades มากสุด ↓
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Collapsible Filter Panel */}
-                          {showFilterPanel && (
-                            <div className="advanced-filter-panel">
-                              <div className="filter-grid">
-                                <div className="filter-col">
-                                  <span className="filter-col-title">Max Drawdown (DD)</span>
-                                  <div className="filter-chips">
-                                    {[null, 5, 8, 10, 15].map(val => (
-                                      <button
-                                        key={String(val)}
-                                        type="button"
-                                        className={`filter-chip ${filterMaxDD === val ? "active" : ""}`}
-                                        onClick={() => setFilterMaxDD(val)}
-                                      >
-                                        {val === null ? "ทั้งหมด" : `≤ ${val}%`}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-
-                                <div className="filter-col">
-                                  <span className="filter-col-title">Min Profit Factor (PF)</span>
-                                  <div className="filter-chips">
-                                    {[null, 1.8, 2.0, 2.5, 3.0].map(val => (
-                                      <button
-                                        key={String(val)}
-                                        type="button"
-                                        className={`filter-chip ${filterMinPF === val ? "active" : ""}`}
-                                        onClick={() => setFilterMinPF(val)}
-                                      >
-                                        {val === null ? "ทั้งหมด" : `≥ ${val}`}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-
-                                <div className="filter-col">
-                                  <span className="filter-col-title">Min Trades</span>
-                                  <div className="filter-chips">
-                                    {[null, 50, 100, 150, 200].map(val => (
-                                      <button
-                                        key={String(val)}
-                                        type="button"
-                                        className={`filter-chip ${filterMinTrades === val ? "active" : ""}`}
-                                        onClick={() => setFilterMinTrades(val)}
-                                      >
-                                        {val === null ? "ทั้งหมด" : `≥ ${val}`}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
+                    {/* Table View (Default) */}
+                    {(step2ViewMode === "table" || step2ViewMode === "both") && (
+                      <div className="preview-results-wrap" style={{ marginTop: 10 }}>
+                        {discoveryPreview ? (
+                          <>
+                            <div className="preview-stat-summary">
+                              <div className="stat-summary-left">
+                                <span className="summary-pill green">
+                                  <CheckCircle2 size={13} />
+                                  ผ่านเกณฑ์มาตรฐาน Quant: <b>{discoveryPreview.qualifying_sets.toLocaleString()}</b> Unique Sets
+                                </span>
+                                <span className="summary-sub">
+                                  (เกณฑ์ Quant: DD ≤ 10% · PF ≥ 2.0 · Trades ≥ 100)
+                                </span>
+                              </div>
+                              <div className="stat-summary-right">
+                                <span className="summary-pill cyan">
+                                  แสดง <b>{filteredPreviewItems.length}</b> จาก <b>{discoveryPreview.items.length}</b> อันดับแรก
+                                </span>
                               </div>
                             </div>
-                          )}
-                        </div>
 
-                        {/* Shortlist Table with Sticky Header and Sort Controls */}
-                        <div className="shortlist-table-wrap">
-                          <table className="shortlist-table">
-                            <thead>
-                              <tr>
-                                <th style={{ width: 38, textAlign: "center" }}>
+                            {/* Search, Filter & Quick Sort Toolbar */}
+                            <div className="filter-sort-toolbar">
+                              <div className="toolbar-top-row">
+                                <div className="search-box-wrap">
+                                  <Search size={14} className="search-box-icon" />
+                                  <input
+                                    type="text"
+                                    placeholder="ค้นหา Set ID หรือ MT5 Pass เช่น set_ หรือ 42..."
+                                    value={searchQuery}
+                                    onChange={e => setSearchQuery(e.target.value)}
+                                    className="filter-search-input"
+                                  />
+                                  {searchQuery && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSearchQuery("")}
+                                      className="search-clear-btn"
+                                      title="ล้างคำค้นหา"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  )}
+                                </div>
+
+                                <div className="toolbar-action-group">
                                   <button
                                     type="button"
-                                    className="table-check-btn"
-                                    onClick={() => toggleSelectAll(filteredPreviewItems)}
-                                    title="เลือก/ยกเลิกทั้งหมดเพื่อ Shortlist"
+                                    className={`filter-toggle-btn ${showFilterPanel ? "active" : ""} ${activeFilterCount > 0 ? "has-filters" : ""}`}
+                                    onClick={() => setShowFilterPanel(!showFilterPanel)}
                                   >
-                                    {filteredPreviewItems.length > 0 && filteredPreviewItems.every(r => selectedResultIds.has(r.id)) ? (
-                                      <CheckSquare size={14} className="green" />
-                                    ) : (
-                                      <Square size={14} className="muted" />
+                                    <Filter size={13} />
+                                    <span>ตัวกรองละเอียด</span>
+                                    {activeFilterCount > 0 && (
+                                      <span className="filter-badge-count">{activeFilterCount}</span>
                                     )}
                                   </button>
-                                </th>
-                                <th
-                                  style={{ width: 54, textAlign: "center" }}
-                                  className="sortable-th"
-                                  onClick={() => handleSort("rank")}
-                                  title="คลิกเพื่อเรียงตามลำดับดั้งเดิม"
-                                >
-                                  <div className="th-sort-wrap center">
-                                    <span>#</span>
-                                    {renderSortIcon("rank")}
-                                  </div>
-                                </th>
-                                <th
-                                  className="sortable-th"
-                                  onClick={() => handleSort("setId")}
-                                  title="คลิกเพื่อเรียงตาม Set ID"
-                                >
-                                  <div className="th-sort-wrap">
-                                    <span>Candidate Set ID / Pass</span>
-                                    {renderSortIcon("setId")}
-                                  </div>
-                                </th>
-                                <th
-                                  style={{ textAlign: "right" }}
-                                  className="sortable-th"
-                                  onClick={() => handleSort("profitFactor")}
-                                  title="คลิกเพื่อเรียงตาม Profit Factor"
-                                >
-                                  <div className="th-sort-wrap right">
-                                    <span>Profit Factor</span>
-                                    {renderSortIcon("profitFactor")}
-                                  </div>
-                                </th>
-                                <th
-                                  style={{ textAlign: "right" }}
-                                  className="sortable-th"
-                                  onClick={() => handleSort("equityDd")}
-                                  title="คลิกเพื่อเรียงตาม Drawdown"
-                                >
-                                  <div className="th-sort-wrap right">
-                                    <span>Drawdown</span>
-                                    {renderSortIcon("equityDd")}
-                                  </div>
-                                </th>
-                                <th
-                                  style={{ textAlign: "right" }}
-                                  className="sortable-th"
-                                  onClick={() => handleSort("trades")}
-                                  title="คลิกเพื่อเรียงตาม Trades"
-                                >
-                                  <div className="th-sort-wrap right">
-                                    <span>Trades</span>
-                                    {renderSortIcon("trades")}
-                                  </div>
-                                </th>
-                                <th
-                                  style={{ textAlign: "right" }}
-                                  className="sortable-th"
-                                  onClick={() => handleSort("profit")}
-                                  title="คลิกเพื่อเรียงตาม Net Profit"
-                                >
-                                  <div className="th-sort-wrap right">
-                                    <span>Net Profit</span>
-                                    {renderSortIcon("profit")}
-                                  </div>
-                                </th>
-                                <th style={{ width: 140, textAlign: "center" }}>Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {filteredPreviewItems.length === 0 ? (
-                                <tr>
-                                  <td colSpan={8} style={{ textAlign: "center", padding: "36px 16px" }}>
-                                    <div className="table-empty-filtered">
-                                      <AlertTriangle size={24} className="muted" />
-                                      <b>ไม่พบ Candidate ที่ตรงกับเงื่อนไขการค้นหาหรือตัวกรอง</b>
-                                      <p className="muted">ลองเปลี่ยนคำค้นหา หรือผ่อนปรนเกณฑ์ Max Drawdown / Min PF</p>
-                                      <Button size="sm" variant="outline" onClick={resetFilters} style={{ marginTop: 8 }}>
-                                        <RotateCcw size={13} /> ล้างตัวกรองทั้งหมด
-                                      </Button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              ) : (
-                                filteredPreviewItems.map((row, idx) => {
-                                  const isSelected = selectedPreviewId === row.id || (!selectedPreviewId && idx === 0);
-                                  const isShortlisted = selectedResultIds.has(row.id);
-                                  return (
-                                    <tr
-                                      key={row.id}
-                                      className={`shortlist-row ${isSelected ? "is-selected" : ""}`}
-                                      onClick={() => setSelectedPreviewId(row.id)}
+
+                                  {(activeFilterCount > 0 || searchQuery || sortField !== "rank" || sortOrder !== "asc") && (
+                                    <button
+                                      type="button"
+                                      onClick={resetFilters}
+                                      className="filter-reset-btn"
+                                      title="รีเซ็ตการเรียงลำดับและตัวกรองทั้งหมด"
                                     >
-                                      <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                                        <button
-                                          type="button"
-                                          className="table-check-btn"
-                                          onClick={() => toggleResultSelection(row.id)}
-                                          title="เลือก/ยกเลิกเพื่อบันทึก Shortlist"
-                                        >
-                                          {isShortlisted ? (
-                                            <CheckSquare size={15} className="green" />
-                                          ) : (
-                                            <Square size={15} className="muted" />
-                                          )}
-                                        </button>
-                                      </td>
-                                      <td style={{ textAlign: "center" }}>
-                                        <span className={`rank-badge ${row.discovery_rank === 1 ? "rank-1" : row.discovery_rank === 2 ? "rank-2" : row.discovery_rank === 3 ? "rank-3" : ""}`}>
-                                          #{row.discovery_rank ?? idx + 1}
-                                        </span>
-                                      </td>
-                                      <td>
-                                        <div className="set-id-cell">
-                                          <code className="table-code font-bold">{row.stable_set_id}</code>
-                                          <small className="muted">MT5 Pass #{row.mt5_pass}</small>
-                                        </div>
-                                      </td>
-                                      <td style={{ textAlign: "right" }} className="cyan mono font-bold">
-                                        {number(row.profit_factor)}
-                                      </td>
-                                      <td style={{ textAlign: "right" }} className="mono">
-                                        {number(row.equity_dd)}%
-                                      </td>
-                                      <td style={{ textAlign: "right" }} className="mono">
-                                        {number(row.trades, 0)}
-                                      </td>
-                                      <td style={{ textAlign: "right" }} className="green mono font-bold">
-                                        ${number(row.profit)}
-                                      </td>
-                                      <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                                        <div className="table-row-actions">
-                                          <Button
-                                            size="sm"
-                                            variant={isSelected ? "default" : "outline"}
-                                            onClick={() => setSelectedPreviewId(row.id)}
-                                            className={`btn-select-cand ${isSelected ? "active" : ""}`}
+                                      <RotateCcw size={12} />
+                                      <span>รีเซ็ต</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Quick Sort Pills */}
+                              <div className="quick-sort-row">
+                                <span className="quick-sort-label">เรียงลำดับด่วน:</span>
+                                <div className="quick-sort-pills">
+                                  <button
+                                    type="button"
+                                    className={`sort-pill ${sortField === "rank" && sortOrder === "asc" ? "active" : ""}`}
+                                    onClick={() => { setSortField("rank"); setSortOrder("asc"); }}
+                                  >
+                                    ลำดับเดิม (Rank #)
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`sort-pill ${sortField === "profitFactor" && sortOrder === "desc" ? "active" : ""}`}
+                                    onClick={() => { setSortField("profitFactor"); setSortOrder("desc"); }}
+                                  >
+                                    Profit Factor สูงสุด ↓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`sort-pill ${sortField === "equityDd" && sortOrder === "asc" ? "active" : ""}`}
+                                    onClick={() => { setSortField("equityDd"); setSortOrder("asc"); }}
+                                  >
+                                    Drawdown ต่ำสุด ↑
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`sort-pill ${sortField === "profit" && sortOrder === "desc" ? "active" : ""}`}
+                                    onClick={() => { setSortField("profit"); setSortOrder("desc"); }}
+                                  >
+                                    Net Profit สูงสุด ↓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`sort-pill ${sortField === "trades" && sortOrder === "desc" ? "active" : ""}`}
+                                    onClick={() => { setSortField("trades"); setSortOrder("desc"); }}
+                                  >
+                                    Trades มากสุด ↓
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Collapsible Filter Panel */}
+                              {showFilterPanel && (
+                                <div className="advanced-filter-panel">
+                                  <div className="filter-grid">
+                                    <div className="filter-col">
+                                      <span className="filter-col-title">Max Drawdown (DD)</span>
+                                      <div className="filter-chips">
+                                        {[null, 5, 8, 10, 15].map(val => (
+                                          <button
+                                            key={String(val)}
+                                            type="button"
+                                            className={`filter-chip ${filterMaxDD === val ? "active" : ""}`}
+                                            onClick={() => setFilterMaxDD(val)}
                                           >
-                                            {isSelected ? "✓ เลือกอยู่" : "เลือกตัวนี้"}
-                                          </Button>
-                                          <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            title="ดาวน์โหลด .set สำหรับ MT5"
-                                            onClick={() => downloadSetFile(
-                                              row.parameters,
-                                              `${row.stable_set_id}_${activeRun?.ea_name || "EA"}`
-                                            )}
+                                            {val === null ? "ทั้งหมด" : `≤ ${val}%`}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    <div className="filter-col">
+                                      <span className="filter-col-title">Min Profit Factor (PF)</span>
+                                      <div className="filter-chips">
+                                        {[null, 1.8, 2.0, 2.5, 3.0].map(val => (
+                                          <button
+                                            key={String(val)}
+                                            type="button"
+                                            className={`filter-chip ${filterMinPF === val ? "active" : ""}`}
+                                            onClick={() => setFilterMinPF(val)}
                                           >
-                                            <Download size={13} />
+                                            {val === null ? "ทั้งหมด" : `≥ ${val}`}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    <div className="filter-col">
+                                      <span className="filter-col-title">Min Trades</span>
+                                      <div className="filter-chips">
+                                        {[null, 50, 100, 150, 200].map(val => (
+                                          <button
+                                            key={String(val)}
+                                            type="button"
+                                            className={`filter-chip ${filterMinTrades === val ? "active" : ""}`}
+                                            onClick={() => setFilterMinTrades(val)}
+                                          >
+                                            {val === null ? "ทั้งหมด" : `≥ ${val}`}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Shortlist Table with Sticky Header and Sort Controls */}
+                            <div className="shortlist-table-wrap">
+                              <table className="shortlist-table">
+                                <thead>
+                                  <tr>
+                                    <th style={{ width: 38, textAlign: "center" }}>
+                                      <button
+                                        type="button"
+                                        className="table-check-btn"
+                                        onClick={() => toggleSelectAll(filteredPreviewItems)}
+                                        title="เลือก/ยกเลิกทั้งหมดเพื่อ Shortlist"
+                                      >
+                                        {filteredPreviewItems.length > 0 && filteredPreviewItems.every(r => selectedResultIds.has(r.id)) ? (
+                                          <CheckSquare size={14} className="green" />
+                                        ) : (
+                                          <Square size={14} className="muted" />
+                                        )}
+                                      </button>
+                                    </th>
+                                    <th
+                                      style={{ width: 54, textAlign: "center" }}
+                                      className="sortable-th"
+                                      onClick={() => handleSort("rank")}
+                                      title="คลิกเพื่อเรียงตามลำดับดั้งเดิม"
+                                    >
+                                      <div className="th-sort-wrap center">
+                                        <span>#</span>
+                                        {renderSortIcon("rank")}
+                                      </div>
+                                    </th>
+                                    <th
+                                      className="sortable-th"
+                                      onClick={() => handleSort("setId")}
+                                      title="คลิกเพื่อเรียงตาม Set ID"
+                                    >
+                                      <div className="th-sort-wrap">
+                                        <span>Candidate Set ID / Pass</span>
+                                        {renderSortIcon("setId")}
+                                      </div>
+                                    </th>
+                                    <th
+                                      style={{ textAlign: "right" }}
+                                      className="sortable-th"
+                                      onClick={() => handleSort("profitFactor")}
+                                      title="คลิกเพื่อเรียงตาม Profit Factor"
+                                    >
+                                      <div className="th-sort-wrap right">
+                                        <span>Profit Factor</span>
+                                        {renderSortIcon("profitFactor")}
+                                      </div>
+                                    </th>
+                                    <th
+                                      style={{ textAlign: "right" }}
+                                      className="sortable-th"
+                                      onClick={() => handleSort("equityDd")}
+                                      title="คลิกเพื่อเรียงตาม Drawdown"
+                                    >
+                                      <div className="th-sort-wrap right">
+                                        <span>Drawdown</span>
+                                        {renderSortIcon("equityDd")}
+                                      </div>
+                                    </th>
+                                    <th
+                                      style={{ textAlign: "right" }}
+                                      className="sortable-th"
+                                      onClick={() => handleSort("trades")}
+                                      title="คลิกเพื่อเรียงตาม Trades"
+                                    >
+                                      <div className="th-sort-wrap right">
+                                        <span>Trades</span>
+                                        {renderSortIcon("trades")}
+                                      </div>
+                                    </th>
+                                    <th
+                                      style={{ textAlign: "right" }}
+                                      className="sortable-th"
+                                      onClick={() => handleSort("profit")}
+                                      title="คลิกเพื่อเรียงตาม Net Profit"
+                                    >
+                                      <div className="th-sort-wrap right">
+                                        <span>Net Profit</span>
+                                        {renderSortIcon("profit")}
+                                      </div>
+                                    </th>
+                                    <th style={{ width: 140, textAlign: "center" }}>Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {filteredPreviewItems.length === 0 ? (
+                                    <tr>
+                                      <td colSpan={8} style={{ textAlign: "center", padding: "36px 16px" }}>
+                                        <div className="table-empty-filtered">
+                                          <AlertTriangle size={24} className="muted" />
+                                          <b>ไม่พบ Candidate ที่ตรงกับเงื่อนไขการค้นหาหรือตัวกรอง</b>
+                                          <p className="muted">ลองเปลี่ยนคำค้นหา หรือผ่อนปรนเกณฑ์ Max Drawdown / Min PF</p>
+                                          <Button size="sm" variant="outline" onClick={resetFilters} style={{ marginTop: 8 }}>
+                                            <RotateCcw size={13} /> ล้างตัวกรองทั้งหมด
                                           </Button>
                                         </div>
                                       </td>
                                     </tr>
-                                  );
-                                })
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
+                                  ) : (
+                                    filteredPreviewItems.map((row, idx) => {
+                                      const isSelected = selectedPreviewId === row.id || (!selectedPreviewId && idx === 0);
+                                      const isShortlisted = selectedResultIds.has(row.id);
+                                      return (
+                                        <tr
+                                          key={row.id}
+                                          className={`shortlist-row ${isSelected ? "is-selected" : ""}`}
+                                          onClick={() => setSelectedPreviewId(row.id)}
+                                        >
+                                          <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                                            <button
+                                              type="button"
+                                              className="table-check-btn"
+                                              onClick={() => toggleResultSelection(row.id)}
+                                              title="เลือก/ยกเลิกเพื่อบันทึก Shortlist"
+                                            >
+                                              {isShortlisted ? (
+                                                <CheckSquare size={15} className="green" />
+                                              ) : (
+                                                <Square size={15} className="muted" />
+                                              )}
+                                            </button>
+                                          </td>
+                                          <td style={{ textAlign: "center" }}>
+                                            <span className={`rank-badge ${row.discovery_rank === 1 ? "rank-1" : row.discovery_rank === 2 ? "rank-2" : row.discovery_rank === 3 ? "rank-3" : ""}`}>
+                                              #{row.discovery_rank ?? idx + 1}
+                                            </span>
+                                          </td>
+                                          <td>
+                                            <div className="set-id-cell">
+                                              <code className="table-code font-bold">{row.stable_set_id}</code>
+                                              <small className="muted">MT5 Pass #{row.mt5_pass}</small>
+                                            </div>
+                                          </td>
+                                          <td style={{ textAlign: "right" }} className="cyan mono font-bold">
+                                            {number(row.profit_factor)}
+                                          </td>
+                                          <td style={{ textAlign: "right" }} className="mono">
+                                            {number(row.equity_dd)}%
+                                          </td>
+                                          <td style={{ textAlign: "right" }} className="mono">
+                                            {number(row.trades, 0)}
+                                          </td>
+                                          <td style={{ textAlign: "right" }} className="green mono font-bold">
+                                            ${number(row.profit)}
+                                          </td>
+                                          <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                                            <div className="table-row-actions">
+                                              <Button
+                                                size="sm"
+                                                variant={isSelected ? "default" : "outline"}
+                                                onClick={() => setSelectedPreviewId(row.id)}
+                                                className={`btn-select-cand ${isSelected ? "active" : ""}`}
+                                              >
+                                                {isSelected ? "✓ เลือกอยู่" : "เลือกตัวนี้"}
+                                              </Button>
+                                              <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                title="ดาวน์โหลด .set สำหรับ MT5"
+                                                onClick={() => downloadSetFile(
+                                                  row.parameters,
+                                                  `${row.stable_set_id}_${activeRun?.ea_name || "EA"}`
+                                                )}
+                                              >
+                                                <Download size={13} />
+                                              </Button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
 
-                        <div className="action-button-row">
-                          <Button
-                            disabled={discoveryBusy || selectedResultIds.size === 0}
-                            onClick={promoteShortlist}
-                            className="btn-promote-primary"
-                          >
-                            {discoveryBusy ? "กำลังบันทึก..." : `✅ บันทึก Shortlist (${selectedResultIds.size} ตัวที่เลือก) และไปทดสอบ Real Tick`}
-                          </Button>
-                          <Button variant="outline" onClick={() => changeStep(3)}>
-                            ไป Step 3: Every Tick <ArrowRight size={15} />
-                          </Button>
-                        </div>
+                            <div className="action-button-row">
+                              <Button
+                                disabled={discoveryBusy || selectedResultIds.size === 0}
+                                onClick={promoteShortlist}
+                                className="btn-promote-primary"
+                              >
+                                {discoveryBusy ? "กำลังบันทึก..." : `✅ บันทึก Shortlist (${selectedResultIds.size} ตัวที่เลือก) และไปทดสอบ Real Tick`}
+                              </Button>
+                              <Button variant="outline" onClick={() => changeStep(3)}>
+                                ไป Step 3: Every Tick <ArrowRight size={15} />
+                              </Button>
+                            </div>
+                          </>
+                        ) : !discoveryBusy ? (
+                          <div className="discovery-loading-state">
+                            <Target size={22} className="text-emerald-600" />
+                            <b>กดปุ่มเลือกขนาด Candidates ด้านบนเพื่อแสดงตาราง</b>
+                            <p className="muted" style={{ fontSize: 11, margin: "4px 0 10px 0" }}>
+                              ระบบจะคัดกรองเฉพาะชุดพารามิเตอร์ที่ผ่านเกณฑ์ DD ≤ 10% และ PF ≥ 2.0
+                            </p>
+                            <Button size="sm" onClick={() => runQuickDiscovery(3)}>
+                              🎯 ค้นหา Top 3 Candidates
+                            </Button>
+                          </div>
+                        ) : null}
                       </div>
                     )}
                   </div>
