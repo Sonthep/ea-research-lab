@@ -64,7 +64,7 @@ def test_run_scope_invalid_selection_and_bounds(client):
     assert response.status_code == 422
     assert client.get("/api/candidates").json()["total"] == 0
     assert client.get("/api/discovery/batches").json()["total"] == 0
-    for top_count in (0, 9, 31, 1000):
+    for top_count in (0, -1, 51, 1000):
         assert client.post("/api/discovery/preview", json={"run_id": first["id"], "top_count": top_count}).status_code == 422
     assert client.post("/api/discovery/preview", json={"run_id": 99999}).status_code == 404
     assert client.post("/api/discovery/preview", json={"run_id": first["id"], "policy": {"min_trades": 1.5}}).status_code == 422

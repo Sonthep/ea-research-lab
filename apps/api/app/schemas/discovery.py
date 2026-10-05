@@ -16,12 +16,12 @@ class DiscoveryPolicy(BaseModel):
 class DiscoveryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     run_id: int = Field(gt=0)
-    top_count: int = Field(default=20, ge=10, le=30)
+    top_count: int = Field(default=20, ge=1, le=50)
     policy: DiscoveryPolicy = Field(default_factory=DiscoveryPolicy)
 
 
 class DiscoveryPromotion(DiscoveryRequest):
-    result_ids: list[int] = Field(min_length=1, max_length=30)
+    result_ids: list[int] = Field(min_length=1, max_length=50)
 
 
 class DiscoverySettings(BaseModel):
