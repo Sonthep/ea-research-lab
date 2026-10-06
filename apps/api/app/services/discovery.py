@@ -3,7 +3,13 @@ from sqlalchemy import select, func
 from app.models.entities import OptimizationResult as R
 from app.schemas.discovery import DiscoveryPolicy
 
-RANKING = ["profit_factor:desc", "recovery_factor:desc", "equity_dd:asc", "trades:desc", "result:desc", "profit:desc"]
+OBJECTIVE_RANKINGS = {
+    "quant_robustness": ["profit_factor:desc", "recovery_factor:desc", "equity_dd:asc", "trades:desc", "result:desc", "profit:desc"],
+    "max_profit": ["profit:desc", "profit_factor:desc", "recovery_factor:desc", "equity_dd:asc", "trades:desc"],
+    "mt5_result": ["result:desc", "profit:desc", "profit_factor:desc", "equity_dd:asc", "trades:desc"],
+    "min_dd": ["equity_dd:asc", "profit_factor:desc", "profit:desc", "trades:desc"]
+}
+RANKING = OBJECTIVE_RANKINGS["quant_robustness"]
 RECOMMENDED = {"optimization_algorithm": "Fast genetic based algorithm", "criterion": "Complex Criterion max", "modelling_method": "1 minute OHLC"}
 
 
@@ -18,15 +24,16 @@ def conditions(policy: DiscoveryPolicy):
     return checks
 
 
-def ordering():
+def ordering(ranking_objective: str = "quant_robustness"):
+    ranking = OBJECTIVE_RANKINGS.get(ranking_objective, OBJECTIVE_RANKINGS["quant_robustness"])
     return [((getattr(R, name).asc() if direction == "asc" else getattr(R, name).desc()).nulls_last())
-            for name, direction in (item.split(":") for item in RANKING)] + [R.id.asc()]
+            for name, direction in (item.split(":") for item in ranking)] + [R.id.asc()]
 
 
-def shortlist_query(run_id: int, policy: DiscoveryPolicy):
+def shortlist_query(run_id: int, policy: DiscoveryPolicy, ranking_objective: str = "quant_robustness"):
     # Repeated passes of the same full parameter hash count as one candidate.
     ranked = select(R.id.label("result_id"), func.row_number().over(
-        partition_by=R.parameter_set_id, order_by=ordering()).label("position")).where(
+        partition_by=R.parameter_set_id, order_by=ordering(ranking_objective)).label("position")).where(
             R.run_id == run_id, *conditions(policy)).subquery()
     return select(ranked.c.result_id).where(ranked.c.position == 1)
 

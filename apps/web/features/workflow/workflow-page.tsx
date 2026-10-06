@@ -187,6 +187,7 @@ export function WorkflowPage() {
   // Discovery state for Step 2
   const [discoveryCount, setDiscoveryCount] = useState<number>(3);
   const [policyMaxDD, setPolicyMaxDD] = useState<number>(12);
+  const [rankingObjective, setRankingObjective] = useState<string>("quant_robustness");
   const [discoveryPreview, setDiscoveryPreview] = useState<DiscoveryPreview>();
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [selectedResultIds, setSelectedResultIds] = useState<Set<number>>(new Set());
@@ -257,16 +258,24 @@ export function WorkflowPage() {
   const currentStepDef = STEPS[activeStep - 1] || STEPS[0];
 
   // Helper to trigger discovery for Step 2
-  async function runQuickDiscovery(count: number, maxDD: number = policyMaxDD) {
+  async function runQuickDiscovery(
+    count: number = discoveryCount,
+    maxDD: number = policyMaxDD,
+    objective: string = rankingObjective,
+    passSearch?: string
+  ) {
     if (!selectedRunId) return;
     setDiscoveryBusy(true);
     setActionError("");
     setDiscoveryCount(count);
     setPolicyMaxDD(maxDD);
+    setRankingObjective(objective);
     try {
       const data = await api<DiscoveryPreview>("/discovery/preview", jsonBody({
         run_id: Number(selectedRunId),
         top_count: count,
+        ranking_objective: objective,
+        pass_search: passSearch || undefined,
         policy: {
           max_equity_dd: maxDD,
           min_profit_factor: 2,
@@ -289,9 +298,9 @@ export function WorkflowPage() {
   // Auto-run discovery when on Step 2 if not loaded yet
   useEffect(() => {
     if (activeStep === 2 && selectedRunId && !discoveryPreview && !discoveryBusy) {
-      runQuickDiscovery(discoveryCount || 5, policyMaxDD);
+      runQuickDiscovery(discoveryCount || 5, policyMaxDD, rankingObjective);
     }
-  }, [activeStep, selectedRunId, discoveryPreview, discoveryBusy, discoveryCount, policyMaxDD]);
+  }, [activeStep, selectedRunId, discoveryPreview, discoveryBusy, discoveryCount, policyMaxDD, rankingObjective]);
 
   // Promote shortlisted candidates
   async function promoteShortlist() {
@@ -302,6 +311,7 @@ export function WorkflowPage() {
       const res = await api<{ created: number; already_candidates: number }>("/discovery/promote", jsonBody({
         run_id: discoveryPreview.run.id,
         top_count: discoveryPreview.top_count,
+        ranking_objective: rankingObjective,
         policy: discoveryPreview.policy,
         result_ids: Array.from(selectedResultIds)
       }));
@@ -903,7 +913,13 @@ export function WorkflowPage() {
                 {activeStep === 2 && (
                   <div className="step-content-pane">
                     <p className="pane-lead">
-                      คัดกรองตัวท็อป 3–5 ตัวโดยใช้เกณฑ์มาตรฐาน Quant (DD ≤ {policyMaxDD}% · PF ≥ 2 · Trades ≥ 100):
+                      คัดกรองตัวท็อปโดยใช้เกณฑ์มาตรฐาน Quant (DD ≤ {policyMaxDD}% · PF ≥ 2 · Trades ≥ 100) — เรียงลำดับตาม:{" "}
+                      <b>{
+                        rankingObjective === "max_profit" ? "💰 กำไรสุทธิสูงสุด (Max Net Profit)" :
+                        rankingObjective === "mt5_result" ? "⚡ MT5 Result สูงสุด" :
+                        rankingObjective === "min_dd" ? "🦺 Drawdown ต่ำสุด" :
+                        "🛡️ ความเสถียรภาพ Quant (PF & DD)"
+                      }</b>
                     </p>
 
                     <div className="discovery-preset-bar">
@@ -919,7 +935,7 @@ export function WorkflowPage() {
                           type="button"
                           className={`preset-btn ${discoveryCount === 3 ? "active" : ""}`}
                           disabled={discoveryBusy}
-                          onClick={() => runQuickDiscovery(3)}
+                          onClick={() => runQuickDiscovery(3, policyMaxDD, rankingObjective)}
                         >
                           <span className="preset-icon">🎯</span>
                           <span className="preset-name">Top 3 Candidates</span>
@@ -929,7 +945,7 @@ export function WorkflowPage() {
                           type="button"
                           className={`preset-btn ${discoveryCount === 5 ? "active" : ""}`}
                           disabled={discoveryBusy}
-                          onClick={() => runQuickDiscovery(5)}
+                          onClick={() => runQuickDiscovery(5, policyMaxDD, rankingObjective)}
                         >
                           <span className="preset-icon">🎯</span>
                           <span className="preset-name">Top 5 Candidates</span>
@@ -939,7 +955,7 @@ export function WorkflowPage() {
                           type="button"
                           className={`preset-btn ${discoveryCount === 10 ? "active" : ""}`}
                           disabled={discoveryBusy}
-                          onClick={() => runQuickDiscovery(10)}
+                          onClick={() => runQuickDiscovery(10, policyMaxDD, rankingObjective)}
                         >
                           <span className="preset-name">Top 10 Candidates</span>
                           <span className="preset-pill muted">กว้าง</span>
@@ -948,11 +964,62 @@ export function WorkflowPage() {
                           type="button"
                           className={`preset-btn ${discoveryCount === 20 ? "active" : ""}`}
                           disabled={discoveryBusy}
-                          onClick={() => runQuickDiscovery(20)}
+                          onClick={() => runQuickDiscovery(20, policyMaxDD, rankingObjective)}
                         >
                           <span className="preset-name">Top 20 Candidates</span>
                           <span className="preset-pill muted">สำรวจลึก</span>
                         </button>
+                      </div>
+
+                      {/* Ranking Objective Selector */}
+                      <div className="discovery-policy-bar objective-bar">
+                        <div className="policy-bar-header">
+                          <span className="policy-label">
+                            🎯 เป้าหมายการจัดอันดับ Top Candidates (Objective):
+                          </span>
+                          <span className="policy-current-val">
+                            โหมดปัจจุบัน: <b>{
+                              rankingObjective === "max_profit" ? "💰 เน้นกำไรสุทธิสูงสุด (Max Net Profit)" :
+                              rankingObjective === "mt5_result" ? "⚡ เน้นคะแนน MT5 Result สูงสุด" :
+                              rankingObjective === "min_dd" ? "🦺 เน้น Drawdown ต่ำสุด" :
+                              "🛡️ Quant Robustness (เน้นเสถียรภาพ PF & DD)"
+                            }</b>
+                          </span>
+                        </div>
+                        <div className="policy-pills">
+                          <button
+                            type="button"
+                            className={`policy-pill ${rankingObjective === "quant_robustness" ? "active" : ""}`}
+                            disabled={discoveryBusy}
+                            onClick={() => runQuickDiscovery(discoveryCount, policyMaxDD, "quant_robustness")}
+                          >
+                            🛡️ Quant เสถียรภาพ (PF สูงสุด)
+                          </button>
+                          <button
+                            type="button"
+                            className={`policy-pill ${rankingObjective === "max_profit" ? "active" : ""}`}
+                            disabled={discoveryBusy}
+                            onClick={() => runQuickDiscovery(discoveryCount, policyMaxDD, "max_profit")}
+                          >
+                            💰 กำไรสุทธิสูงสุด (Max Profit) ⭐ ดึงชุดในภาพ MT5
+                          </button>
+                          <button
+                            type="button"
+                            className={`policy-pill ${rankingObjective === "mt5_result" ? "active" : ""}`}
+                            disabled={discoveryBusy}
+                            onClick={() => runQuickDiscovery(discoveryCount, policyMaxDD, "mt5_result")}
+                          >
+                            ⚡ MT5 Result สูงสุด (Complex Max)
+                          </button>
+                          <button
+                            type="button"
+                            className={`policy-pill ${rankingObjective === "min_dd" ? "active" : ""}`}
+                            disabled={discoveryBusy}
+                            onClick={() => runQuickDiscovery(discoveryCount, policyMaxDD, "min_dd")}
+                          >
+                            🦺 Drawdown ต่ำสุด (Safe)
+                          </button>
+                        </div>
                       </div>
 
                       {/* Policy Max Drawdown Selector */}
@@ -972,7 +1039,7 @@ export function WorkflowPage() {
                               type="button"
                               className={`policy-pill ${policyMaxDD === val ? "active" : ""}`}
                               disabled={discoveryBusy}
-                              onClick={() => runQuickDiscovery(discoveryCount, val)}
+                              onClick={() => runQuickDiscovery(discoveryCount, val, rankingObjective)}
                             >
                               ≤ {val}% {val === 12 ? "⭐ ปรับเป็น 12%" : val === 10 ? "(เกณฑ์เดิม)" : ""}
                             </button>
@@ -1067,7 +1134,12 @@ export function WorkflowPage() {
                                   ผ่านเกณฑ์มาตรฐาน Quant: <b>{discoveryPreview.qualifying_sets.toLocaleString()}</b> Unique Sets
                                 </span>
                                 <span className="summary-sub">
-                                  (เกณฑ์ Quant: DD ≤ {discoveryPreview?.policy?.max_equity_dd ?? policyMaxDD}% · PF ≥ 2.0 · Trades ≥ 100)
+                                  (เกณฑ์: DD ≤ {discoveryPreview?.policy?.max_equity_dd ?? policyMaxDD}% · PF ≥ 2.0 · Trades ≥ 100 · {
+                                    rankingObjective === "max_profit" ? "เรียงตามกำไรสุทธิสูงสุด" :
+                                    rankingObjective === "mt5_result" ? "เรียงตาม MT5 Result" :
+                                    rankingObjective === "min_dd" ? "เรียงตาม Drawdown ต่ำสุด" :
+                                    "เรียงตามเสถียรภาพ Quant PF"
+                                  })
                                 </span>
                               </div>
                               <div className="stat-summary-right">
@@ -1084,15 +1156,23 @@ export function WorkflowPage() {
                                   <Search size={14} className="search-box-icon" />
                                   <input
                                     type="text"
-                                    placeholder="ค้นหา Set ID หรือ MT5 Pass เช่น set_ หรือ 42..."
+                                    placeholder="ค้นหา Set ID หรือ MT5 Pass เช่น 11563, 11759, set_..."
                                     value={searchQuery}
                                     onChange={e => setSearchQuery(e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === "Enter" && searchQuery.trim()) {
+                                        runQuickDiscovery(discoveryCount, policyMaxDD, rankingObjective, searchQuery.trim());
+                                      }
+                                    }}
                                     className="filter-search-input"
                                   />
                                   {searchQuery && (
                                     <button
                                       type="button"
-                                      onClick={() => setSearchQuery("")}
+                                      onClick={() => {
+                                        setSearchQuery("");
+                                        runQuickDiscovery(discoveryCount, policyMaxDD, rankingObjective);
+                                      }}
                                       className="search-clear-btn"
                                       title="ล้างคำค้นหา"
                                     >
@@ -1100,6 +1180,18 @@ export function WorkflowPage() {
                                     </button>
                                   )}
                                 </div>
+                                {searchQuery.trim() && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    style={{ fontSize: 11, padding: "5px 10px", whiteSpace: "nowrap" }}
+                                    title="ค้นหา Pass นี้จากข้อมูล Optimization ทั้งหมด"
+                                    disabled={discoveryBusy}
+                                    onClick={() => runQuickDiscovery(discoveryCount, policyMaxDD, rankingObjective, searchQuery.trim())}
+                                  >
+                                    🔍 ค้นหาทั้ง Run
+                                  </button>
+                                )}
 
                                 <div className="toolbar-action-group">
                                   <button

@@ -4,14 +4,23 @@ from sqlalchemy.exc import IntegrityError
 from app.api.routes import DB, require, run_data, result_data
 from app.models.entities import OptimizationRun, OptimizationResult, ParameterSet, Candidate, DiscoveryBatch
 from app.schemas.discovery import DiscoveryRequest, DiscoveryPromotion, DiscoverySettings
-from app.services.discovery import RANKING, RECOMMENDED, conditions, ordering, shortlist_query, settings_evidence
+from app.services.discovery import (
+    RANKING, RECOMMENDED, OBJECTIVE_RANKINGS,
+    conditions, ordering, shortlist_query, settings_evidence
+)
 
 router = APIRouter(prefix="/api/discovery", tags=["Candidate discovery"])
 
 
 @router.get("/configuration")
 def configuration():
-    return {"recommended": RECOMMENDED, "ranking": RANKING, "min_candidates": 10, "max_candidates": 30}
+    return {
+        "recommended": RECOMMENDED,
+        "ranking": RANKING,
+        "objectives": list(OBJECTIVE_RANKINGS.keys()),
+        "min_candidates": 10,
+        "max_candidates": 30
+    }
 
 
 @router.patch("/runs/{run_id}/settings")
@@ -25,17 +34,27 @@ def update_settings(run_id: int, body: DiscoverySettings, db: DB):
 
 def build_preview(body: DiscoveryRequest, db):
     run = require(db, OptimizationRun, body.run_id)
-    unique = shortlist_query(run.id, body.policy)
+    obj = body.ranking_objective or "quant_robustness"
+    ranking_list = OBJECTIVE_RANKINGS.get(obj, OBJECTIVE_RANKINGS["quant_robustness"])
+    unique = shortlist_query(run.id, body.policy, obj)
     eligible = db.scalar(select(func.count()).select_from(unique.subquery()))
     matches = db.scalar(select(func.count()).select_from(OptimizationResult).where(
         OptimizationResult.run_id == run.id, *conditions(body.policy)))
+    
+    base_conditions = [OptimizationResult.id.in_(unique)]
+    if body.pass_search and body.pass_search.strip():
+        search_term = body.pass_search.strip()
+        base_conditions.append(OptimizationResult.mt5_pass.ilike(f"%{search_term}%"))
+
     query = select(OptimizationResult, ParameterSet, Candidate.id).join(
         ParameterSet, OptimizationResult.parameter_set_id == ParameterSet.id).outerjoin(
         Candidate, Candidate.parameter_set_id == ParameterSet.id).where(
-        OptimizationResult.id.in_(unique)).order_by(*ordering()).limit(body.top_count)
+        *base_conditions).order_by(*ordering(obj)).limit(body.top_count)
     actual, warnings = settings_evidence(run)
     return {"run": run_data(db, run), "settings": actual, "recommended": RECOMMENDED,
-            "settings_warnings": warnings, "policy": body.policy.model_dump(), "ranking": RANKING,
+            "settings_warnings": warnings, "policy": body.policy.model_dump(),
+            "ranking": ranking_list, "ranking_objective": obj,
+            "available_objectives": list(OBJECTIVE_RANKINGS.keys()),
             "top_count": body.top_count, "total_results": run.result_count,
             "qualifying_results": matches, "qualifying_sets": eligible,
             "status": "DISCOVERED" if eligible else "NO_MATCHES", "validation_status": "NOT_TESTED",
@@ -54,13 +73,22 @@ def promote_discovery(body: DiscoveryPromotion, db: DB):
     ids = set(body.result_ids)
     allowed = {r["id"]: r for r in preview["items"]}
     if not ids.issubset(allowed):
-        raise HTTPException(422, "Select only results from the current run's filtered Top Candidates preview.")
+        valid_count = db.scalar(select(func.count()).select_from(OptimizationResult).where(
+            OptimizationResult.id.in_(ids), OptimizationResult.run_id == body.run_id, *conditions(body.policy)))
+        if valid_count != len(ids):
+            raise HTTPException(422, "Select only results from the current run that satisfy the discovery policy.")
+        extra_query = select(OptimizationResult, ParameterSet, Candidate.id).join(
+            ParameterSet, OptimizationResult.parameter_set_id == ParameterSet.id).outerjoin(
+            Candidate, Candidate.parameter_set_id == ParameterSet.id).where(OptimizationResult.id.in_(ids))
+        for r, p, c_id in db.execute(extra_query):
+            allowed[r.id] = {**result_data(r, p, preview["run"]["deposit"], c_id), "discovery_rank": 0}
+
     existing = {c.parameter_set_id: c for c in db.scalars(select(Candidate).where(
         Candidate.parameter_set_id.in_([allowed[i]["parameter_set_id"] for i in ids])))}
-    new_rows = [r for r in preview["items"] if r["id"] in ids and r["parameter_set_id"] not in existing]
+    new_rows = [allowed[i] for i in ids if allowed[i]["parameter_set_id"] not in existing]
     batch = None
     if new_rows:
-        batch = DiscoveryBatch(run_id=body.run_id, policy=preview["policy"], ranking=RANKING,
+        batch = DiscoveryBatch(run_id=body.run_id, policy=preview["policy"], ranking=preview["ranking"],
             run_settings={**preview["settings"], "ea_name": preview["run"]["ea_name"],
                           "symbol": preview["run"]["symbol"], "timeframe": preview["run"]["timeframe"],
                           "date_from": preview["run"]["date_from"], "date_to": preview["run"]["date_to"]},

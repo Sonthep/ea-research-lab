@@ -120,3 +120,16 @@ def test_duplicate_passes_missing_metrics_and_boundary(client):
     assert len(data["items"]) == 1 and data["items"][0]["mt5_pass"] == "1"
     promoted = client.post("/api/discovery/promote", json={"run_id": response.json()["id"], "result_ids": [data["items"][0]["id"]]})
     assert promoted.status_code == 201 and promoted.json()["created"] == 1  # Do not pad a small valid shortlist.
+
+
+def test_discovery_ranking_objectives_and_pass_search(client):
+    run = import_run(client, 100)
+    profit_data = preview(client, run["id"], top_count=5, ranking_objective="max_profit")
+    assert profit_data["ranking_objective"] == "max_profit"
+    profits = [r["profit"] for r in profit_data["items"]]
+    assert profits == sorted(profits, reverse=True)
+
+    first_pass = profit_data["items"][0]["mt5_pass"]
+    search_data = preview(client, run["id"], top_count=5, pass_search=first_pass)
+    assert any(r["mt5_pass"] == first_pass for r in search_data["items"])
+

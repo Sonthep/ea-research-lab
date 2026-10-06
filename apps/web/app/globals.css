@@ -759,6 +759,23 @@ th.sticky { background: #f8fafc; z-index: 4; }
   cursor: not-allowed;
 }
 
+.discovery-policy-bar.objective-bar {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+.discovery-policy-bar.objective-bar .policy-current-val b {
+  color: #059669;
+}
+
+.discovery-policy-bar.objective-bar .policy-pill.active {
+  background: #059669;
+  border-color: #059669;
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(5, 150, 105, 0.25);
+}
+
 /* Step 2: Preview Summary & Shortlist Table */
 .preview-results-wrap {
   display: flex;

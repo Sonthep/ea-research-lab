@@ -16,8 +16,10 @@ class DiscoveryPolicy(BaseModel):
 class DiscoveryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     run_id: int = Field(gt=0)
-    top_count: int = Field(default=20, ge=1, le=50)
+    top_count: int = Field(default=20, ge=1, le=100)
     policy: DiscoveryPolicy = Field(default_factory=DiscoveryPolicy)
+    ranking_objective: str = Field(default="quant_robustness")
+    pass_search: str | None = Field(default=None)
 
 
 class DiscoveryPromotion(DiscoveryRequest):
