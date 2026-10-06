@@ -682,9 +682,81 @@ th.sticky { background: #f8fafc; z-index: 4; }
   background: #f1f5f9;
   color: #475569;
 }
-.preset-pill.muted {
-  background: #f1f5f9;
-  color: #94a3b8;
+/* Policy Max Drawdown Selector Bar */
+.discovery-policy-bar {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.policy-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.policy-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.policy-current-val {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.policy-current-val b {
+  color: #0284c7;
+  font-weight: 700;
+}
+
+.policy-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.policy-pill {
+  padding: 5px 11px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.policy-pill:hover:not(:disabled) {
+  border-color: #0284c7;
+  color: #0284c7;
+  background: #f0f9ff;
+}
+
+.policy-pill.active {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(2, 132, 199, 0.25);
+}
+
+.policy-pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Step 2: Preview Summary & Shortlist Table */

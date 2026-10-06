@@ -84,7 +84,7 @@ const STEPS: StepDef[] = [
     subtitle: "คัดกรองเฉพาะ Shortlist คุณภาพสูงสุด",
     icon: Target,
     mt5Action: "เตรียมรับ .set file หรือ Copy parameters ของ Candidate",
-    labAction: "กรอง DD ≤ 10%, PF ≥ 2, Trades ≥ 100 แล้วเลือก 3–5 ตัวท็อป"
+    labAction: "กรอง DD ≤ 12%, PF ≥ 2, Trades ≥ 100 แล้วเลือก 3–5 ตัวท็อป"
   },
   {
     id: 3,
@@ -186,6 +186,7 @@ export function WorkflowPage() {
 
   // Discovery state for Step 2
   const [discoveryCount, setDiscoveryCount] = useState<number>(3);
+  const [policyMaxDD, setPolicyMaxDD] = useState<number>(12);
   const [discoveryPreview, setDiscoveryPreview] = useState<DiscoveryPreview>();
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [selectedResultIds, setSelectedResultIds] = useState<Set<number>>(new Set());
@@ -256,17 +257,18 @@ export function WorkflowPage() {
   const currentStepDef = STEPS[activeStep - 1] || STEPS[0];
 
   // Helper to trigger discovery for Step 2
-  async function runQuickDiscovery(count: number) {
+  async function runQuickDiscovery(count: number, maxDD: number = policyMaxDD) {
     if (!selectedRunId) return;
     setDiscoveryBusy(true);
     setActionError("");
     setDiscoveryCount(count);
+    setPolicyMaxDD(maxDD);
     try {
       const data = await api<DiscoveryPreview>("/discovery/preview", jsonBody({
         run_id: Number(selectedRunId),
         top_count: count,
         policy: {
-          max_equity_dd: 10,
+          max_equity_dd: maxDD,
           min_profit_factor: 2,
           min_trades: 100,
           profit_above: 0
@@ -287,9 +289,9 @@ export function WorkflowPage() {
   // Auto-run discovery when on Step 2 if not loaded yet
   useEffect(() => {
     if (activeStep === 2 && selectedRunId && !discoveryPreview && !discoveryBusy) {
-      runQuickDiscovery(discoveryCount || 5);
+      runQuickDiscovery(discoveryCount || 5, policyMaxDD);
     }
-  }, [activeStep, selectedRunId, discoveryPreview, discoveryBusy, discoveryCount]);
+  }, [activeStep, selectedRunId, discoveryPreview, discoveryBusy, discoveryCount, policyMaxDD]);
 
   // Promote shortlisted candidates
   async function promoteShortlist() {
@@ -901,7 +903,7 @@ export function WorkflowPage() {
                 {activeStep === 2 && (
                   <div className="step-content-pane">
                     <p className="pane-lead">
-                      คัดกรองตัวท็อป 3–5 ตัวโดยใช้เกณฑ์มาตรฐาน Quant (DD ≤ 10% · PF ≥ 2 · Trades ≥ 100):
+                      คัดกรองตัวท็อป 3–5 ตัวโดยใช้เกณฑ์มาตรฐาน Quant (DD ≤ {policyMaxDD}% · PF ≥ 2 · Trades ≥ 100):
                     </p>
 
                     <div className="discovery-preset-bar">
@@ -951,6 +953,31 @@ export function WorkflowPage() {
                           <span className="preset-name">Top 20 Candidates</span>
                           <span className="preset-pill muted">สำรวจลึก</span>
                         </button>
+                      </div>
+
+                      {/* Policy Max Drawdown Selector */}
+                      <div className="discovery-policy-bar">
+                        <div className="policy-bar-header">
+                          <span className="policy-label">
+                            🛡️ เกณฑ์ Max Drawdown (DD) สูงสุด:
+                          </span>
+                          <span className="policy-current-val">
+                            กำลังกรองที่: <b>≤ {policyMaxDD}%</b>
+                          </span>
+                        </div>
+                        <div className="policy-pills">
+                          {[8, 10, 12, 15, 20].map(val => (
+                            <button
+                              key={val}
+                              type="button"
+                              className={`policy-pill ${policyMaxDD === val ? "active" : ""}`}
+                              disabled={discoveryBusy}
+                              onClick={() => runQuickDiscovery(discoveryCount, val)}
+                            >
+                              ≤ {val}% {val === 12 ? "⭐ ปรับเป็น 12%" : val === 10 ? "(เกณฑ์เดิม)" : ""}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
 
@@ -1040,7 +1067,7 @@ export function WorkflowPage() {
                                   ผ่านเกณฑ์มาตรฐาน Quant: <b>{discoveryPreview.qualifying_sets.toLocaleString()}</b> Unique Sets
                                 </span>
                                 <span className="summary-sub">
-                                  (เกณฑ์ Quant: DD ≤ 10% · PF ≥ 2.0 · Trades ≥ 100)
+                                  (เกณฑ์ Quant: DD ≤ {discoveryPreview?.policy?.max_equity_dd ?? policyMaxDD}% · PF ≥ 2.0 · Trades ≥ 100)
                                 </span>
                               </div>
                               <div className="stat-summary-right">
@@ -1150,7 +1177,7 @@ export function WorkflowPage() {
                                     <div className="filter-col">
                                       <span className="filter-col-title">Max Drawdown (DD)</span>
                                       <div className="filter-chips">
-                                        {[null, 5, 8, 10, 15].map(val => (
+                                        {[null, 5, 8, 10, 12, 15, 20].map(val => (
                                           <button
                                             key={String(val)}
                                             type="button"
