@@ -2398,6 +2398,152 @@ th.sticky { background: #f8fafc; z-index: 4; }
   color: #64748b;
 }
 
+/* Step 5: Multi-Year Stress Test MT5 & Workbench Styling */
+.step5-mt5-guide-box {
+  background: #ffffff;
+}
+
+.step5-preset-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.step5-preset-chip {
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.step5-preset-chip:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.step5-preset-chip.active {
+  background: #ecfdf5;
+  border-color: #059669;
+  color: #047857;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(5, 150, 105, 0.12);
+}
+
+.step5-dates-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #f1f5f9;
+  border-radius: 7px;
+  border: 1px solid #e2e8f0;
+  margin-top: 6px;
+}
+
+.step5-dates-display .date-pair {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: #475569;
+}
+
+.step5-dates-display .date-pair b {
+  color: #0f172a;
+  margin-left: 2px;
+}
+
+.step5-model-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.step5-model-card {
+  padding: 9px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.step5-model-card:hover {
+  background: #ffffff;
+  border-color: #cbd5e1;
+}
+
+.step5-model-card.selected {
+  background: #f0fdf4;
+  border-color: #059669;
+  box-shadow: 0 1px 4px rgba(5, 150, 105, 0.12);
+}
+
+.step5-model-card .model-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.step5-model-card .model-head b {
+  font-size: 11px;
+  color: #0f172a;
+}
+
+.step5-model-card p {
+  font-size: 10px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.speed-pill {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.speed-pill.fast {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.speed-pill.accurate {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.step5-regimes-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.regime-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  color: #334155;
+}
+
 /* =================================================================== */
 /* RESPONSIVE DESIGN                                                   */
 /* =================================================================== */

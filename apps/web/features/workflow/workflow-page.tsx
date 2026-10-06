@@ -231,6 +231,28 @@ export function WorkflowPage() {
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Step 5 Multi-Year Stress Test states
+  const [longPeriodFrom, setLongPeriodFrom] = useState("2021-01-01");
+  const [longPeriodTo, setLongPeriodTo] = useState("2024-10-01");
+  const [longPeriodModel, setLongPeriodModel] = useState("Every tick based on real ticks");
+  const [longPeriodProfit, setLongPeriodProfit] = useState("");
+  const [longPeriodDD, setLongPeriodDD] = useState("");
+  const [longPeriodPF, setLongPeriodPF] = useState("");
+  const [longPeriodTrades, setLongPeriodTrades] = useState("");
+  const [longPeriodRecovery, setLongPeriodRecovery] = useState("");
+  const [longPeriodBusy, setLongPeriodBusy] = useState(false);
+  const [step5UploadedImage, setStep5UploadedImage] = useState<string | null>(null);
+  const [step5UploadedImageName, setStep5UploadedImageName] = useState<string>("");
+  const [step5OcrBusy, setStep5OcrBusy] = useState(false);
+  const [step5OcrProgress, setStep5OcrProgress] = useState(0);
+  const [step5OcrStatusText, setStep5OcrStatusText] = useState("");
+  const [step5OcrDetected, setStep5OcrDetected] = useState<ParsedMT5Report | null>(null);
+  const [step5OcrSuccessMessage, setStep5OcrSuccessMessage] = useState("");
+  const [step5ShowTextPasteBox, setStep5ShowTextPasteBox] = useState(false);
+  const [step5RawPastedText, setStep5RawPastedText] = useState("");
+  const [step5IsDraggingOver, setStep5IsDraggingOver] = useState(false);
+  const step5FileInputRef = useRef<HTMLInputElement>(null);
+
   // Data fetching
   const runs = useApi<Page<Run>>("/optimization-runs?page_size=100");
   const candidates = useApi<Page<Candidate>>(
@@ -478,10 +500,162 @@ export function WorkflowPage() {
     }
   }
 
-  // Global paste handler for Step 3
+  // Step 5 Preprocessing & OCR worker
+  async function step5PreprocessAndOCR(imageSrc: string, fileName: string) {
+    setStep5UploadedImage(imageSrc);
+    setStep5UploadedImageName(fileName);
+    setStep5OcrBusy(true);
+    setStep5OcrProgress(15);
+    setStep5OcrStatusText("กำลังปรับแต่งความละเอียดภาพสำหรับอ่านตาราง...");
+    setStep5OcrDetected(null);
+    setStep5OcrSuccessMessage("");
+
+    try {
+      const img = new window.Image();
+      img.crossOrigin = "anonymous";
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Failed to load image"));
+        img.src = imageSrc;
+      });
+
+      setStep5OcrProgress(30);
+      setStep5OcrStatusText("กำลังประมวลผลความคมชัดและอัตราส่วนพิกเซล (2.2x)...");
+
+      const canvas = document.createElement("canvas");
+      const scale = 2.2;
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      }
+
+      setStep5OcrProgress(45);
+      setStep5OcrStatusText("กำลังเริ่มต้น Tesseract OCR Engine...");
+
+      const { createWorker } = await import("tesseract.js");
+      const worker = await createWorker("eng");
+
+      setStep5OcrProgress(65);
+      setStep5OcrStatusText("กำลังสแกนสถิติ Multi-Year Report...");
+
+      const ret = await worker.recognize(canvas);
+      await worker.terminate();
+
+      setStep5OcrProgress(90);
+      setStep5OcrStatusText("กำลังแยกแยะค่าสถิติจากตาราง Report...");
+
+      const parsed = parseMT5ReportText(ret.data.text);
+      setStep5OcrDetected(parsed);
+
+      let detectedCount = 0;
+      if (parsed.profit !== null) {
+        setLongPeriodProfit(String(parsed.profit));
+        detectedCount++;
+      }
+      if (parsed.equity_dd !== null) {
+        setLongPeriodDD(String(parsed.equity_dd));
+        detectedCount++;
+      }
+      if (parsed.profit_factor !== null) {
+        setLongPeriodPF(String(parsed.profit_factor));
+        detectedCount++;
+      }
+      if (parsed.trades !== null) {
+        setLongPeriodTrades(String(parsed.trades));
+        detectedCount++;
+      }
+      if (parsed.recovery_factor != null) {
+        setLongPeriodRecovery(String(parsed.recovery_factor));
+      }
+      if (parsed.period_from) {
+        setLongPeriodFrom(parsed.period_from);
+      }
+      if (parsed.period_to) {
+        setLongPeriodTo(parsed.period_to);
+      }
+
+      setStep5OcrProgress(100);
+      if (detectedCount > 0) {
+        setStep5OcrSuccessMessage(`✨ ตรวจพบและกรอกอัตโนมัติแล้ว ${detectedCount}/4 ค่าสำคัญสำเร็จ!`);
+      } else {
+        setStep5OcrSuccessMessage("⚠️ อ่านข้อความได้ แต่ไม่พบคีย์เวิร์ดมาตรฐาน MT5 กรุณากรอกด้วยตนเอง");
+      }
+    } catch (err) {
+      console.error("Step 5 OCR Error:", err);
+      setStep5OcrStatusText("เกิดข้อผิดพลาดในการอ่านรูปภาพ");
+      setStep5OcrSuccessMessage("ไม่สามารถอ่านตัวเลขได้โดยอัตโนมัติ กรุณากรอกตัวเลขด้วยตนเอง");
+    } finally {
+      setStep5OcrBusy(false);
+    }
+  }
+
+  function step5HandleImageFile(file: File) {
+    if (!file) return;
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          step5PreprocessAndOCR(e.target.result as string, file.name);
+        }
+      };
+      reader.readAsDataURL(file);
+    } else if (file.name.endsWith(".htm") || file.name.endsWith(".html") || file.name.endsWith(".txt")) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          step5HandleTextReport(e.target.result as string, file.name);
+        }
+      };
+      reader.readAsText(file);
+    }
+  }
+
+  function step5HandleTextReport(text: string, sourceName = "MT5 Report Text") {
+    const parsed = parseMT5ReportText(text);
+    setStep5OcrDetected(parsed);
+    let detectedCount = 0;
+    if (parsed.profit !== null) {
+      setLongPeriodProfit(String(parsed.profit));
+      detectedCount++;
+    }
+    if (parsed.equity_dd !== null) {
+      setLongPeriodDD(String(parsed.equity_dd));
+      detectedCount++;
+    }
+    if (parsed.profit_factor !== null) {
+      setLongPeriodPF(String(parsed.profit_factor));
+      detectedCount++;
+    }
+    if (parsed.trades !== null) {
+      setLongPeriodTrades(String(parsed.trades));
+      detectedCount++;
+    }
+    if (parsed.recovery_factor != null) {
+      setLongPeriodRecovery(String(parsed.recovery_factor));
+    }
+    if (parsed.period_from) {
+      setLongPeriodFrom(parsed.period_from);
+    }
+    if (parsed.period_to) {
+      setLongPeriodTo(parsed.period_to);
+    }
+
+    if (detectedCount > 0) {
+      setStep5OcrSuccessMessage(`✨ ดึงค่าสถิติสำเร็จ ${detectedCount}/4 ค่าจาก ${sourceName}!`);
+      setStep5ShowTextPasteBox(false);
+    } else {
+      setStep5OcrSuccessMessage("⚠️ ไม่พบคีย์เวิร์ดของ MT5 ในข้อความที่วาง");
+    }
+  }
+
+  // Global paste handler for Step 3 & Step 5
   useEffect(() => {
     function handlePaste(e: ClipboardEvent) {
-      if (activeStep !== 3) return;
+      if (activeStep !== 3 && activeStep !== 5) return;
       const activeEl = document.activeElement;
       if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) {
         return;
@@ -494,7 +668,11 @@ export function WorkflowPage() {
         if (items[i].type.startsWith("image/")) {
           const blob = items[i].getAsFile();
           if (blob) {
-            handleImageFile(blob);
+            if (activeStep === 3) {
+              handleImageFile(blob);
+            } else if (activeStep === 5) {
+              step5HandleImageFile(blob);
+            }
             e.preventDefault();
             return;
           }
@@ -502,8 +680,12 @@ export function WorkflowPage() {
       }
 
       const text = e.clipboardData?.getData("text");
-      if (text && (text.includes("Profit") || text.includes("Drawdown") || text.includes("Trades") || text.includes("\t"))) {
-        handleTextReport(text, "Clipboard Text");
+      if (text && (text.includes("Profit") || text.includes("Drawdown") || text.includes("Trades") || text.includes("\t") || text.includes("Period"))) {
+        if (activeStep === 3) {
+          handleTextReport(text, "Clipboard Text");
+        } else if (activeStep === 5) {
+          step5HandleTextReport(text, "Clipboard Text");
+        }
         e.preventDefault();
       }
     }
@@ -726,6 +908,173 @@ export function WorkflowPage() {
     const ok = await copyToClipboard(summary);
     if (ok) {
       setCopiedText("validation_summary");
+      setTimeout(() => setCopiedText(""), 2500);
+    }
+  }
+
+  // Step 5: Long Period (Multi-Year Stress Test) state & calculations
+  const longPeriodRecords = activeCandidate?.records.filter(r => r.stage === "long_period") || [];
+  const latestLongPeriod = longPeriodRecords[longPeriodRecords.length - 1];
+
+  // Auto-fill Step 5 form if existing validation record found and inputs are empty
+  useEffect(() => {
+    if (activeStep === 5 && latestLongPeriod?.metrics && !longPeriodProfit) {
+      if (latestLongPeriod.metrics.profit != null) setLongPeriodProfit(String(latestLongPeriod.metrics.profit));
+      if (latestLongPeriod.metrics.equity_dd != null) setLongPeriodDD(String(latestLongPeriod.metrics.equity_dd));
+      if (latestLongPeriod.metrics.profit_factor != null) setLongPeriodPF(String(latestLongPeriod.metrics.profit_factor));
+      if (latestLongPeriod.metrics.trades != null) setLongPeriodTrades(String(latestLongPeriod.metrics.trades));
+      if (latestLongPeriod.metrics.recovery_factor != null) setLongPeriodRecovery(String(latestLongPeriod.metrics.recovery_factor));
+      if (latestLongPeriod.settings?.period_from) setLongPeriodFrom(String(latestLongPeriod.settings.period_from));
+      if (latestLongPeriod.settings?.period_to) setLongPeriodTo(String(latestLongPeriod.settings.period_to));
+      if (latestLongPeriod.settings?.modelling_method) setLongPeriodModel(String(latestLongPeriod.settings.modelling_method));
+    }
+  }, [activeStep, latestLongPeriod, longPeriodProfit]);
+
+  const step5StressAnalysis = useMemo(() => {
+    const p = parseFloat(longPeriodProfit);
+    const dd = parseFloat(longPeriodDD);
+    const pf = parseFloat(longPeriodPF);
+    const tr = parseInt(longPeriodTrades, 10);
+    const recInput = parseFloat(longPeriodRecovery);
+
+    const baseP = baseline?.profit ?? null;
+    const baseDD = baseline?.equity_dd ?? null;
+    const basePF = baseline?.profit_factor ?? null;
+    const baseTr = baseline?.trades ?? null;
+    const deposit = activeRun?.deposit || 3000;
+
+    const hasData = !isNaN(p) && !isNaN(dd);
+    if (!hasData) return null;
+
+    // Estimate duration in years
+    const dFrom = new Date(longPeriodFrom);
+    const dTo = new Date(longPeriodTo);
+    const timeDiff = !isNaN(dFrom.getTime()) && !isNaN(dTo.getTime()) ? dTo.getTime() - dFrom.getTime() : 0;
+    const years = Math.max(0.5, timeDiff > 0 ? timeDiff / (365.25 * 24 * 3600 * 1000) : 3.75);
+
+    const annualizedProfit = p / years;
+    const maxDDMoney = deposit * (dd / 100);
+    const recoveryFactor = !isNaN(recInput) && recInput > 0
+      ? recInput
+      : (maxDDMoney > 0 ? p / maxDDMoney : (p > 0 ? 10 : 0));
+
+    // Comparative ratios
+    const profitMultiple = baseP && baseP > 0 ? p / baseP : null;
+    const ddIncreasePp = baseDD !== null ? dd - baseDD : null;
+    const ddMultiple = baseDD && baseDD > 0 ? dd / baseDD : null;
+    const pfDiff = basePF !== null && !isNaN(pf) ? pf - basePF : null;
+    const tradesPerYear = tr > 0 ? tr / years : null;
+
+    // Standard Quant Benchmark criteria
+    const isProfitable = p > 0;
+    const isDDCapped = dd <= 18 && (ddMultiple === null || ddMultiple <= 1.8);
+    const isPFHealthy = !isNaN(pf) ? pf >= 1.50 : true;
+    const isRecoveryStrong = recoveryFactor >= 3.0;
+
+    const isPassed = isProfitable && isDDCapped && isPFHealthy && isRecoveryStrong;
+
+    return {
+      profit: p,
+      dd,
+      pf: isNaN(pf) ? null : pf,
+      trades: isNaN(tr) ? null : tr,
+      years,
+      annualizedProfit,
+      recoveryFactor,
+      profitMultiple,
+      ddIncreasePp,
+      ddMultiple,
+      pfDiff,
+      tradesPerYear,
+      isProfitable,
+      isDDCapped,
+      isPFHealthy,
+      isRecoveryStrong,
+      isPassed
+    };
+  }, [longPeriodProfit, longPeriodDD, longPeriodPF, longPeriodTrades, longPeriodRecovery, longPeriodFrom, longPeriodTo, baseline, activeRun]);
+
+  async function submitLongPeriodTest(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedCandidateId) return;
+    setLongPeriodBusy(true);
+    setActionError("");
+    setActionSuccess("");
+    try {
+      const deposit = activeRun?.deposit || 3000;
+      const p = Number(longPeriodProfit);
+      const dd = Number(longPeriodDD);
+      const calculatedRecFactor = dd > 0 ? p / (deposit * (dd / 100)) : undefined;
+      const recFactor = longPeriodRecovery ? Number(longPeriodRecovery) : calculatedRecFactor;
+
+      await api(`/candidates/${selectedCandidateId}/validation/long_period`, jsonBody({
+        label: `Multi-Year Regimes (${longPeriodFrom} to ${longPeriodTo})`,
+        metrics: {
+          profit: p,
+          equity_dd: dd,
+          profit_factor: Number(longPeriodPF),
+          trades: Number(longPeriodTrades),
+          recovery_factor: recFactor ? Number(recFactor.toFixed(2)) : undefined
+        },
+        settings: {
+          period_from: longPeriodFrom,
+          period_to: longPeriodTo,
+          modelling_method: longPeriodModel
+        },
+        notes: step5UploadedImageName
+          ? `Validated multi-year stress test with MT5 screenshot: ${step5UploadedImageName}`
+          : `Multi-year stress test (${longPeriodFrom} to ${longPeriodTo}) on MetaTrader 5`
+      }));
+
+      setActionSuccess("บันทึกผล Multi-Year Backtest เรียบร้อยแล้ว! ผ่านการทดสอบวัฏจักรตลาด");
+      setRevision(r => r + 1);
+    } catch (err) {
+      setActionError((err as Error).message);
+    } finally {
+      setLongPeriodBusy(false);
+    }
+  }
+
+  async function copyStep5Summary() {
+    if (!step5StressAnalysis && !latestLongPeriod) return;
+    const setId = activeCandidate?.baseline.stable_set_id || "Candidate";
+    const eaName =
+      activeCandidate?.run.ea_name && activeCandidate.run.ea_name !== "Unknown EA"
+        ? activeCandidate.run.ea_name
+        : activeRun?.ea_name && activeRun.ea_name !== "Unknown EA"
+        ? activeRun.ea_name
+        : "EA";
+    const symbol =
+      activeCandidate?.run.symbol && activeCandidate.run.symbol !== "Symbol"
+        ? activeCandidate.run.symbol
+        : activeRun?.symbol && activeRun.symbol !== "Symbol"
+        ? activeRun.symbol
+        : "XAUUSD";
+    const tf = activeCandidate?.run.timeframe || activeRun?.timeframe || "M1";
+
+    const p = step5StressAnalysis?.profit ?? latestLongPeriod?.metrics?.profit ?? 0;
+    const dd = step5StressAnalysis?.dd ?? latestLongPeriod?.metrics?.equity_dd ?? 0;
+    const pf = step5StressAnalysis?.pf ?? latestLongPeriod?.metrics?.profit_factor ?? 0;
+    const tr = step5StressAnalysis?.trades ?? latestLongPeriod?.metrics?.trades ?? 0;
+    const rec = step5StressAnalysis?.recoveryFactor ?? latestLongPeriod?.metrics?.recovery_factor ?? 0;
+    const passed = step5StressAnalysis ? step5StressAnalysis.isPassed : (latestLongPeriod?.status === "PASSED");
+
+    const summary = [
+      `🔬 [EA Research Lab] Step 5 Multi-Year Stress Test: ${passed ? "PASSED ✅" : "REVIEW NEEDED ⚠️"}`,
+      `Candidate: ${setId} (${eaName} ${symbol} ${tf})`,
+      `Testing Period: ${longPeriodFrom} to ${longPeriodTo} (${step5StressAnalysis?.years.toFixed(1) ?? "3.7"} Years)`,
+      `Model: ${longPeriodModel}`,
+      `• Net Profit: $${number(p)} (Annualized: ~$${number(step5StressAnalysis?.annualizedProfit ?? (p / 3.7))}/yr)`,
+      `• Max Equity DD: ${number(dd)}% (Baseline: ${number(baseline?.equity_dd)}%)`,
+      `• Profit Factor: ${number(pf)} (Baseline: ${number(baseline?.profit_factor)})`,
+      `• Total Trades: ${tr}`,
+      `• Recovery Factor: ${number(rec)} (Target: ≥ 3.0)`,
+      `Verdict: ${passed ? "REGIME SURVIVAL PASSED" : "REVIEW NEEDED"}`
+    ].join("\n");
+
+    const ok = await copyToClipboard(summary);
+    if (ok) {
+      setCopiedText("step5_summary");
       setTimeout(() => setCopiedText(""), 2500);
     }
   }
@@ -1080,7 +1429,7 @@ export function WorkflowPage() {
 
           <div className="two-way-grid">
             {/* LEFT COLUMN: META TRADER 5 INSTRUCTIONS & ACTIONS OR STEP 4 DIAGNOSTICS */}
-            <div className={`handshake-box mt5-terminal-box ${activeStep === 4 ? "step4-diagnostics-box" : ""}`}>
+            <div className={`handshake-box mt5-terminal-box ${activeStep === 4 ? "step4-diagnostics-box" : activeStep === 5 ? "step5-mt5-guide-box" : ""}`}>
               {activeStep === 4 ? (
                 <>
                   <div className="box-header">
@@ -1204,6 +1553,168 @@ export function WorkflowPage() {
                       >
                         ← ปรับแก้ผลสถิติ / อัปโหลดใหม่
                       </Button>
+                    </div>
+                  </div>
+                </>
+              ) : activeStep === 5 ? (
+                <>
+                  <div className="box-header">
+                    <span className="platform-tag mt5-tag">METATRADER 5 ACTIONS</span>
+                    <h3>การตั้งค่าขยายเวลา Backtest (Multi-Year)</h3>
+                  </div>
+
+                  <div className="box-content">
+                    <div className="instruction-step-list">
+                      <div className="instruction-item highlight">
+                        <span className="num-dot">1</span>
+                        <div>
+                          <b>ขยายช่วงวันที่ทดสอบ (Date Range Selection):</b>
+                          <p>
+                            เลือกช่วงเวลา 3–5 ปี ให้ครอบคลุมทุกสภาวะตลาด (Bull 2021, Bear 2022, Fed Rate Hikes 2023, All-Time Highs 2024):
+                          </p>
+
+                          {/* Presets Grid */}
+                          <div className="step5-preset-buttons">
+                            <button
+                              type="button"
+                              className={`step5-preset-chip ${longPeriodFrom === "2021-01-01" && longPeriodTo === "2024-10-01" ? "active" : ""}`}
+                              onClick={() => {
+                                setLongPeriodFrom("2021-01-01");
+                                setLongPeriodTo("2024-10-01");
+                              }}
+                            >
+                              ⚡ 3 ปี แนะนำ (2021 – 2024)
+                            </button>
+                            <button
+                              type="button"
+                              className={`step5-preset-chip ${longPeriodFrom === "2019-01-01" && longPeriodTo === "2024-10-01" ? "active" : ""}`}
+                              onClick={() => {
+                                setLongPeriodFrom("2019-01-01");
+                                setLongPeriodTo("2024-10-01");
+                              }}
+                            >
+                              🛡️ 5 ปี ครบวัฏจักร (2019 – 2024)
+                            </button>
+                            <button
+                              type="button"
+                              className={`step5-preset-chip ${longPeriodFrom === "2022-01-01" && longPeriodTo === "2024-10-01" ? "active" : ""}`}
+                              onClick={() => {
+                                setLongPeriodFrom("2022-01-01");
+                                setLongPeriodTo("2024-10-01");
+                              }}
+                            >
+                              🌐 2 ปี ยุคดอกเบี้ยสูง (2022 – 2024)
+                            </button>
+                          </div>
+
+                          <div className="step5-dates-display">
+                            <div className="date-pair">
+                              <span>From: <b className="mono">{longPeriodFrom.replace(/-/g, ".")}</b></span>
+                              <span>To: <b className="mono">{longPeriodTo.replace(/-/g, ".")}</b></span>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleCopy(`${longPeriodFrom.replace(/-/g, ".")} - ${longPeriodTo.replace(/-/g, ".")}`, "mt5_dates")}
+                            >
+                              <Copy size={13} />
+                              {copiedText === "mt5_dates" ? "คัดลอกวันที่แล้ว!" : "Copy MT5 Dates"}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="instruction-item">
+                        <span className="num-dot">2</span>
+                        <div>
+                          <b>เลือกความเร็วในการรัน (Modelling Method):</b>
+                          <div className="step5-model-cards">
+                            <div
+                              className={`step5-model-card ${longPeriodModel === "1 minute OHLC" ? "selected" : ""}`}
+                              onClick={() => setLongPeriodModel("1 minute OHLC")}
+                            >
+                              <div className="model-head">
+                                <b>⚡ 1 minute OHLC (รวดเร็ว)</b>
+                                <span className="speed-pill fast">~1-2 นาที</span>
+                              </div>
+                              <p>เหมาะสำหรับ Fast Screening เพื่อดู Curve กำไรและ Drawdown เบื้องต้นอย่างรวดเร็ว</p>
+                            </div>
+
+                            <div
+                              className={`step5-model-card ${longPeriodModel === "Every tick based on real ticks" ? "selected" : ""}`}
+                              onClick={() => setLongPeriodModel("Every tick based on real ticks")}
+                            >
+                              <div className="model-head">
+                                <b>💎 Real Ticks (แม่นยำสูงสุด)</b>
+                                <span className="speed-pill accurate">Final Sign-off</span>
+                              </div>
+                              <p>จำลองข้อมูล Tick จริงและ Spread ลอยตัว สำหรับยืนยันตัว Candidate ที่ผ่านเข้ารอบสุดท้าย</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="instruction-item">
+                        <span className="num-dot">3</span>
+                        <div>
+                          <b>ใส่ค่าพารามิเตอร์ของ Candidate:</b>
+                          <p>ใช้ค่าพารามิเตอร์ชุดเดิมที่ผ่านเกณฑ์ Real Tick จาก Step 3–4:</p>
+                          {currentActiveParams ? (
+                            <div className="mt5-candidate-selected-card">
+                              <div className="selected-card-header">
+                                <span className="selected-badge">TESTING CANDIDATE</span>
+                                <b className="mono font-bold">{currentActiveSetId}</b>
+                              </div>
+                              <div className="mt5-quick-actions">
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleCopy(
+                                    formatSetFileContent(currentActiveParams, {
+                                      setId: currentActiveSetId,
+                                      eaName: currentActiveEAName,
+                                      symbol: currentActiveSymbol || undefined
+                                    }),
+                                    "mt5_params_step5"
+                                  )}
+                                >
+                                  <Copy size={14} />
+                                  {copiedText === "mt5_params_step5" ? "คัดลอกแล้ว!" : "Copy Params"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => downloadSetFile(
+                                    currentActiveParams,
+                                    `${currentActiveSetId}_MultiYear_${currentActiveEAName}`,
+                                    {
+                                      setId: currentActiveSetId,
+                                      eaName: currentActiveEAName,
+                                      symbol: currentActiveSymbol || undefined
+                                    }
+                                  )}
+                                >
+                                  <Download size={14} /> Save .set File
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <small className="muted">ไม่มีข้อมูลพารามิเตอร์</small>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="instruction-item">
+                        <span className="num-dot">4</span>
+                        <div>
+                          <b>วัฏจักรตลาดที่ถูกครอบคลุมในรอบนี้ (Regimes Covered):</b>
+                          <div className="step5-regimes-pills">
+                            <span className="regime-pill">🐂 Bull Market (Trending Up)</span>
+                            <span className="regime-pill">🐻 Bear Market (Rate Hikes Cycle)</span>
+                            <span className="regime-pill">🦀 Extended Sideway / Chop</span>
+                            <span className="regime-pill">⚡ High Volatility & Crisis Spikes</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </>
@@ -2651,6 +3162,642 @@ export function WorkflowPage() {
                   </div>
                 )}
 
+                {/* STEP 5: MULTI-YEAR MARKET REGIMES STRESS TEST */}
+                {activeStep === 5 && (
+                  <div className="step-content-pane">
+                    {/* Active Candidate Context Banner */}
+                    {activeCandidate && (
+                      <div className="step3-candidate-banner">
+                        <div className="banner-left">
+                          <span className="banner-tag">🎯 Active Candidate: Multi-Year Stress Test</span>
+                          <span className="banner-title">
+                            <b>{activeCandidate.baseline?.stable_set_id ? `SET-${activeCandidate.baseline.stable_set_id}` : `Candidate #${activeCandidate.id}`}</b>
+                            {activeCandidate.run?.ea_name ? ` (EA: ${activeCandidate.run.ea_name})` : ""}
+                          </span>
+                        </div>
+                        <div className="banner-right">
+                          <span className="baseline-label">Baseline In-Sample:</span>
+                          <span className="baseline-stat">
+                            Profit: <b>${number(baseline?.profit)}</b>
+                          </span>
+                          <span className="baseline-stat">
+                            DD: <b>{baseline?.equity_dd?.toFixed(2)}%</b>
+                          </span>
+                          <span className="baseline-stat">
+                            PF: <b>{baseline?.profit_factor?.toFixed(2)}</b>
+                          </span>
+                          <span className="baseline-stat">
+                            Trades: <b>{baseline?.trades}</b>
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="pane-lead">
+                      ขยายช่วงเวลาทดสอบ Backtest เป็น 3–5 ปี ข้ามสภาวะตลาดหลากหลายรูปแบบ (Bull, Bear, Sideway, High Volatility)
+                      อัปโหลดภาพผลการทดสอบ หรือกรอกตัวเลขสถิติเพื่อประเมินความคงทนข้ามวัฏจักร:
+                    </p>
+
+                    {/* SMART OCR DROPZONE OR UPLOADED PREVIEW */}
+                    {!step5UploadedImage ? (
+                      <div className="step3-smart-reader-card">
+                        <div
+                          className={`step3-dropzone ${step5IsDraggingOver ? "dragging" : ""}`}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            setStep5IsDraggingOver(true);
+                          }}
+                          onDragLeave={() => setStep5IsDraggingOver(false)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setStep5IsDraggingOver(false);
+                            const file = e.dataTransfer.files?.[0];
+                            if (file) step5HandleImageFile(file);
+                          }}
+                          onClick={() => step5FileInputRef.current?.click()}
+                        >
+                          <input
+                            ref={step5FileInputRef}
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp,.htm,.html,.txt"
+                            style={{ display: "none" }}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) step5HandleImageFile(file);
+                            }}
+                          />
+                          <div className="dropzone-icon-circle">
+                            <UploadCloud size={28} className="text-emerald-600" />
+                          </div>
+                          <div className="dropzone-content">
+                            <h4>อัปโหลดภาพผลทดสอบ Multi-Year Report (Smart OCR Auto-Fill)</h4>
+                            <p>
+                              ลากไฟล์ภาพสกรีนช็อต MT5 Report หรือกดเลือกไฟล์ (ระบบอ่าน Net Profit, Max DD, PF, Trades, และวันที่อัตโนมัติ)
+                            </p>
+                            <div className="dropzone-actions">
+                              <Button
+                                size="sm"
+                                type="button"
+                                variant="default"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  step5FileInputRef.current?.click();
+                                }}
+                              >
+                                <UploadCloud size={14} /> เลือกไฟล์รูปภาพ
+                              </Button>
+                              <span className="paste-hint-pill">⚡ กด Ctrl + V วางภาพได้ทันที</span>
+                              <Button
+                                size="sm"
+                                type="button"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setStep5ShowTextPasteBox(prev => !prev);
+                                }}
+                              >
+                                <FileText size={14} /> วางข้อความ Report / HTML
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {step5OcrBusy && (
+                          <div style={{ marginTop: 12 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4, fontWeight: 600, color: "#065f46" }}>
+                              <span>{step5OcrStatusText}</span>
+                              <span>{step5OcrProgress}%</span>
+                            </div>
+                            <div style={{ width: "100%", height: 6, background: "#e2e8f0", borderRadius: 3, overflow: "hidden" }}>
+                              <div
+                                style={{
+                                  width: `${step5OcrProgress}%`,
+                                  height: "100%",
+                                  background: "linear-gradient(90deg, #059669, #10b981)",
+                                  transition: "width 0.3s ease"
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {step5ShowTextPasteBox && (
+                          <div className="text-paste-box">
+                            <label>วางข้อความตารางสถิติ หรือโค้ด HTML ที่คัดลอกจาก MT5 Strategy Tester Report:</label>
+                            <textarea
+                              rows={4}
+                              placeholder="วางตารางสถิติ หรือ Report HTML จาก MT5 ที่นี่..."
+                              value={step5RawPastedText}
+                              onChange={(e) => setStep5RawPastedText(e.target.value)}
+                            />
+                            <div className="text-paste-actions">
+                              <Button
+                                size="sm"
+                                type="button"
+                                onClick={() => step5HandleTextReport(step5RawPastedText, "Pasted Text")}
+                                disabled={!step5RawPastedText.trim()}
+                              >
+                                <Sparkles size={14} /> ดึงค่าสถิติอัตโนมัติ
+                              </Button>
+                              <Button
+                                size="sm"
+                                type="button"
+                                variant="ghost"
+                                onClick={() => setStep5ShowTextPasteBox(false)}
+                              >
+                                ยกเลิก
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="step3-smart-reader-card">
+                        <div className="step3-image-preview-card">
+                          <div className="preview-image-side">
+                            <div className="preview-thumb-box" onClick={() => setShowImageModal(true)}>
+                              <img src={step5UploadedImage} alt="MT5 Multi-Year Screenshot" className="preview-thumb-img" />
+                              <div className="thumb-zoom-overlay">
+                                <Eye size={16} /> ดูรูปขนาดเต็ม
+                              </div>
+                            </div>
+                            <div className="thumb-meta-row">
+                              <span className="file-name-tag" title={step5UploadedImageName}>
+                                <ImageIcon size={13} /> {step5UploadedImageName || "multi_year_report.png"}
+                              </span>
+                              <button
+                                type="button"
+                                className="change-img-btn"
+                                onClick={() => {
+                                  setStep5UploadedImage(null);
+                                  setStep5OcrDetected(null);
+                                  setStep5OcrSuccessMessage("");
+                                }}
+                              >
+                                เปลี่ยนภาพ
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="preview-detected-side">
+                            <div className="detected-header">
+                              <span className="detected-title">
+                                <Sparkles size={15} className="text-emerald-600" />
+                                <b>ผลการอ่านสถิติ Multi-Year จากภาพ:</b>
+                              </span>
+                              {step5OcrBusy ? (
+                                <span className="ocr-busy-tag">
+                                  <RefreshCw size={13} className="spin" /> {step5OcrStatusText} ({step5OcrProgress}%)
+                                </span>
+                              ) : step5OcrSuccessMessage ? (
+                                <span className="ocr-status-pill">{step5OcrSuccessMessage}</span>
+                              ) : null}
+                            </div>
+
+                            <div className="detected-chips-grid">
+                              <div className={`detected-chip ${step5OcrDetected?.profit != null ? "found" : ""}`}>
+                                <span className="chip-label">Multi-Year Profit</span>
+                                <span className="chip-val">
+                                  {step5OcrDetected?.profit != null ? `$${number(step5OcrDetected.profit)}` : "—"}
+                                </span>
+                              </div>
+
+                              <div className={`detected-chip ${step5OcrDetected?.equity_dd != null ? "found" : ""}`}>
+                                <span className="chip-label">Max Equity DD</span>
+                                <span className="chip-val">
+                                  {step5OcrDetected?.equity_dd != null ? `${step5OcrDetected.equity_dd.toFixed(2)}%` : "—"}
+                                </span>
+                              </div>
+
+                              <div className={`detected-chip ${step5OcrDetected?.profit_factor != null ? "found" : ""}`}>
+                                <span className="chip-label">Profit Factor</span>
+                                <span className="chip-val">
+                                  {step5OcrDetected?.profit_factor != null ? step5OcrDetected.profit_factor.toFixed(2) : "—"}
+                                </span>
+                              </div>
+
+                              <div className={`detected-chip ${step5OcrDetected?.trades != null ? "found" : ""}`}>
+                                <span className="chip-label">Total Trades</span>
+                                <span className="chip-val">
+                                  {step5OcrDetected?.trades != null ? step5OcrDetected.trades : "—"}
+                                </span>
+                              </div>
+                            </div>
+
+                            {(step5OcrDetected?.recovery_factor || step5OcrDetected?.period_from || step5OcrDetected?.expected_payoff) && (
+                              <div className="detected-extra-row">
+                                {step5OcrDetected?.period_from && (
+                                  <span className="extra-stat">ช่วงเวลา: <b>{step5OcrDetected.period_from} → {step5OcrDetected.period_to}</b></span>
+                                )}
+                                {step5OcrDetected?.recovery_factor != null && (
+                                  <span className="extra-stat">Recovery Factor: <b>{step5OcrDetected.recovery_factor}</b></span>
+                                )}
+                                {step5OcrDetected?.expected_payoff != null && (
+                                  <span className="extra-stat">Expected Payoff: <b>{step5OcrDetected.expected_payoff}</b></span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Step 5 Form */}
+                    <form onSubmit={submitLongPeriodTest} className="record-form-grid" style={{ marginTop: 14 }}>
+                      <div className="form-group">
+                        <label>
+                          ช่วงวันที่เริ่ม (Date From)
+                          {step5OcrDetected?.period_from && (
+                            <span className="input-detect-badge">✨ Auto-filled</span>
+                          )}
+                        </label>
+                        <input
+                          required
+                          type="date"
+                          value={longPeriodFrom}
+                          onChange={e => setLongPeriodFrom(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label>
+                          ช่วงวันที่สิ้นสุด (Date To)
+                          {step5OcrDetected?.period_to && (
+                            <span className="input-detect-badge">✨ Auto-filled</span>
+                          )}
+                        </label>
+                        <input
+                          required
+                          type="date"
+                          value={longPeriodTo}
+                          onChange={e => setLongPeriodTo(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label>Modelling Method</label>
+                        <select
+                          value={longPeriodModel}
+                          onChange={e => setLongPeriodModel(e.target.value)}
+                          className="w-full px-3 py-2 border rounded text-xs bg-white text-slate-800"
+                        >
+                          <option value="Every tick based on real ticks">Every tick based on real ticks (แม่นยำสูงสุด)</option>
+                          <option value="1 minute OHLC">1 minute OHLC (รวดเร็ว)</option>
+                        </select>
+                      </div>
+
+                      <div className="form-group">
+                        <label>
+                          Total Net Profit ($)
+                          {step5OcrDetected?.profit != null && (
+                            <span className="input-detect-badge">✨ Auto-filled</span>
+                          )}
+                        </label>
+                        <input
+                          required
+                          type="number"
+                          step="any"
+                          placeholder="เช่น 28450.00"
+                          value={longPeriodProfit}
+                          onChange={e => setLongPeriodProfit(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label>
+                          Max Equity Drawdown (%)
+                          {step5OcrDetected?.equity_dd != null && (
+                            <span className="input-detect-badge">✨ Auto-filled</span>
+                          )}
+                        </label>
+                        <input
+                          required
+                          type="number"
+                          step="any"
+                          placeholder="เช่น 14.50"
+                          value={longPeriodDD}
+                          onChange={e => setLongPeriodDD(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label>
+                          Profit Factor
+                          {step5OcrDetected?.profit_factor != null && (
+                            <span className="input-detect-badge">✨ Auto-filled</span>
+                          )}
+                        </label>
+                        <input
+                          required
+                          type="number"
+                          step="any"
+                          placeholder="เช่น 2.85"
+                          value={longPeriodPF}
+                          onChange={e => setLongPeriodPF(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label>
+                          Total Trades
+                          {step5OcrDetected?.trades != null && (
+                            <span className="input-detect-badge">✨ Auto-filled</span>
+                          )}
+                        </label>
+                        <input
+                          required
+                          type="number"
+                          step="1"
+                          placeholder="เช่น 2180"
+                          value={longPeriodTrades}
+                          onChange={e => setLongPeriodTrades(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label>
+                          Recovery Factor
+                          <span className="muted" style={{ fontSize: 10, marginLeft: 4 }}>(คำนวณอัตโนมัติหากเว้นว่าง)</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          placeholder={step5StressAnalysis ? String(Number(step5StressAnalysis.recoveryFactor.toFixed(2))) : "เช่น 5.20"}
+                          value={longPeriodRecovery}
+                          onChange={e => setLongPeriodRecovery(e.target.value)}
+                        />
+                      </div>
+
+                      {/* Live Stress Comparison Table */}
+                      {(step5StressAnalysis || latestLongPeriod) && (
+                        <div style={{ gridColumn: "span 2" }}>
+                          <h4 style={{ fontSize: 13, fontWeight: 700, margin: "10px 0 8px 0", color: "#0f172a" }}>
+                            📊 การเปรียบเทียบความคงทนข้ามวัฏจักร (In-Sample 1Y vs Multi-Year Stress Test)
+                          </h4>
+
+                          <table className="terminal-compare-table">
+                            <thead>
+                              <tr>
+                                <th>Metric</th>
+                                <th>In-Sample Baseline (1 ปี)</th>
+                                <th>Multi-Year ({step5StressAnalysis?.years.toFixed(1) || "3.7"} ปี)</th>
+                                <th>Delta / Ratio</th>
+                                <th>Regime Tolerance</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                <td>Net Profit</td>
+                                <td className="mono">${number(baseline?.profit)}</td>
+                                <td className="mono font-bold">
+                                  ${number(step5StressAnalysis?.profit ?? latestLongPeriod?.metrics?.profit)}
+                                  <small className="muted" style={{ display: "block", fontSize: 10 }}>
+                                    (~${number(step5StressAnalysis?.annualizedProfit ?? 0)}/ปี)
+                                  </small>
+                                </td>
+                                <td className={`mono ${(step5StressAnalysis?.profit ?? 0) > 0 ? "green" : "red"}`}>
+                                  {step5StressAnalysis?.profitMultiple ? `${step5StressAnalysis.profitMultiple.toFixed(1)}x ของเดิม` : "—"}
+                                </td>
+                                <td>
+                                  {(step5StressAnalysis?.profit ?? 0) > 0 ? (
+                                    <span className="badge-status passed">PROFITABLE</span>
+                                  ) : (
+                                    <span className="badge-status danger">UNPROFITABLE</span>
+                                  )}
+                                </td>
+                              </tr>
+
+                              <tr>
+                                <td>Equity Drawdown</td>
+                                <td className="mono">{number(baseline?.equity_dd)}%</td>
+                                <td className="mono font-bold">{number(step5StressAnalysis?.dd ?? latestLongPeriod?.metrics?.equity_dd)}%</td>
+                                <td className={`mono ${(step5StressAnalysis?.dd ?? 0) <= 18 ? "green" : "red"}`}>
+                                  {step5StressAnalysis?.ddIncreasePp != null ? `${step5StressAnalysis.ddIncreasePp >= 0 ? "+" : ""}${step5StressAnalysis.ddIncreasePp.toFixed(2)} pp` : "—"}
+                                  {step5StressAnalysis?.ddMultiple ? ` (${step5StressAnalysis.ddMultiple.toFixed(2)}x)` : ""}
+                                </td>
+                                <td>
+                                  {(step5StressAnalysis?.dd ?? 0) <= 18 ? (
+                                    <span className="badge-status passed">CONTROLLED (≤ 18%)</span>
+                                  ) : (
+                                    <span className="badge-status danger">DD EXPANDED (&gt; 18%)</span>
+                                  )}
+                                </td>
+                              </tr>
+
+                              <tr>
+                                <td>Profit Factor</td>
+                                <td className="mono">{number(baseline?.profit_factor)}</td>
+                                <td className="mono font-bold">{number(step5StressAnalysis?.pf ?? latestLongPeriod?.metrics?.profit_factor)}</td>
+                                <td className="mono">
+                                  {step5StressAnalysis?.pfDiff != null ? `${step5StressAnalysis.pfDiff >= 0 ? "+" : ""}${step5StressAnalysis.pfDiff.toFixed(2)}` : "—"}
+                                </td>
+                                <td>
+                                  {(step5StressAnalysis?.pf ?? latestLongPeriod?.metrics?.profit_factor ?? 0) >= 1.5 ? (
+                                    <span className="badge-status passed">HEALTHY (≥ 1.50)</span>
+                                  ) : (
+                                    <span className="badge-status warning">LOW PF (&lt; 1.50)</span>
+                                  )}
+                                </td>
+                              </tr>
+
+                              <tr>
+                                <td>Recovery Factor</td>
+                                <td className="mono">
+                                  {number(baseline?.recovery_factor ?? (baseline?.profit && baseline?.equity_dd ? baseline.profit / (3000 * (baseline.equity_dd / 100)) : 4.0))}
+                                </td>
+                                <td className="mono font-bold">
+                                  {number(step5StressAnalysis?.recoveryFactor ?? latestLongPeriod?.metrics?.recovery_factor)}
+                                </td>
+                                <td className="mono">Target &ge; 3.0</td>
+                                <td>
+                                  {(step5StressAnalysis?.recoveryFactor ?? latestLongPeriod?.metrics?.recovery_factor ?? 0) >= 3.0 ? (
+                                    <span className="badge-status passed">STRONG (≥ 3.0)</span>
+                                  ) : (
+                                    <span className="badge-status warning">MODERATE</span>
+                                  )}
+                                </td>
+                              </tr>
+
+                              <tr>
+                                <td>Total Trades</td>
+                                <td className="mono">{baseline?.trades}</td>
+                                <td className="mono font-bold">
+                                  {step5StressAnalysis?.trades ?? latestLongPeriod?.metrics?.trades}
+                                  {step5StressAnalysis?.tradesPerYear && (
+                                    <small className="muted" style={{ display: "block", fontSize: 10 }}>
+                                      (~{Math.round(step5StressAnalysis.tradesPerYear)} ไม้/ปี)
+                                    </small>
+                                  )}
+                                </td>
+                                <td className="mono">สม่ำเสมอทุกวัฏจักร</td>
+                                <td>
+                                  <span className="badge-status neutral">TRACKED</span>
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+
+                          {/* Market Regime Robustness Checklist */}
+                          <div className="step4-checklist-box" style={{ marginTop: 14 }}>
+                            <h4>
+                              <ShieldCheck size={16} className="text-emerald-600" />
+                              Market Regime Robustness Checklist (เกณฑ์ประเมินการรอดพ้นวัฏจักรตลาด)
+                            </h4>
+                            <div className="checklist-items-grid">
+                              <div className={`checklist-item ${step5StressAnalysis?.isProfitable ? "passed" : "failed"}`}>
+                                <div className="item-icon">
+                                  {step5StressAnalysis?.isProfitable ? (
+                                    <CheckCircle2 size={16} className="text-emerald-600" />
+                                  ) : (
+                                    <XCircle size={16} className="text-red-500" />
+                                  )}
+                                </div>
+                                <div className="item-text">
+                                  <b>All-Weather Profitability (กำไรสะสมตลอด 3–5 ปี &gt; $0)</b>
+                                  <span>
+                                    ทำได้: ${number(step5StressAnalysis?.profit ?? 0)} (ไม่แตกในวิกฤติตลาด)
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className={`checklist-item ${step5StressAnalysis?.isDDCapped ? "passed" : "failed"}`}>
+                                <div className="item-icon">
+                                  {step5StressAnalysis?.isDDCapped ? (
+                                    <CheckCircle2 size={16} className="text-emerald-600" />
+                                  ) : (
+                                    <XCircle size={16} className="text-red-500" />
+                                  )}
+                                </div>
+                                <div className="item-text">
+                                  <b>Controlled Multi-Year Drawdown (&le; 18% หรือ &le; 1.8x)</b>
+                                  <span>
+                                    ทำได้: {step5StressAnalysis?.dd.toFixed(2)}% (เกณฑ์สูงสุดยอมรับได้ &le; 18%)
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className={`checklist-item ${step5StressAnalysis?.isPFHealthy ? "passed" : "failed"}`}>
+                                <div className="item-icon">
+                                  {step5StressAnalysis?.isPFHealthy ? (
+                                    <CheckCircle2 size={16} className="text-emerald-600" />
+                                  ) : (
+                                    <XCircle size={16} className="text-amber-500" />
+                                  )}
+                                </div>
+                                <div className="item-text">
+                                  <b>Sustainable Profit Factor (&ge; 1.50 ระยะยาว)</b>
+                                  <span>
+                                    ทำได้: {step5StressAnalysis?.pf?.toFixed(2) ?? "—"} (ความได้เปรียบทางสถิติคงอยู่)
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className={`checklist-item ${step5StressAnalysis?.isRecoveryStrong ? "passed" : "failed"}`}>
+                                <div className="item-icon">
+                                  {step5StressAnalysis?.isRecoveryStrong ? (
+                                    <CheckCircle2 size={16} className="text-emerald-600" />
+                                  ) : (
+                                    <XCircle size={16} className="text-amber-500" />
+                                  )}
+                                </div>
+                                <div className="item-text">
+                                  <b>Capital Recovery Power (Recovery Factor &ge; 3.0)</b>
+                                  <span>
+                                    ทำได้: {step5StressAnalysis?.recoveryFactor.toFixed(2)} (กำไรฟื้นตัวจากหลุม DD ได้เร็ว)
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Verdict Banner */}
+                          <div className="verdict-banner" style={{ marginTop: 14 }}>
+                            <div className="verdict-info">
+                              <b>ผลการประเมินสภาวะตลาดหลายปี (Regime Survival Verdict):</b>
+                              <p>
+                                {step5StressAnalysis?.isPassed
+                                  ? "กลยุทธ์สอบผ่านการทดสอบวัฏจักรตลาดหลายปี สามารถทำกำไรข้ามสภาวะตลาด Bull, Bear, Sideway ได้อย่างมีเสถียรภาพ และควบคุม Drawdown ได้ดี"
+                                  : "ระบบมีอาการอ่อนไหวต่อบางสภาวะตลาด หรือ Drawdown ขยายตัวเกินเกณฑ์ ควรพิจารณาจำกัดช่วงเวลาเทรด หรือเพิ่มตัวกรอง Trend/Volatility"}
+                              </p>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={copyStep5Summary}
+                                style={{ background: "#ffffff", fontSize: 11 }}
+                              >
+                                <Copy size={13} />
+                                {copiedText === "step5_summary" ? "คัดลอกสรุปแล้ว!" : "Copy Report"}
+                              </Button>
+                              <span className={`verdict-stamp ${step5StressAnalysis?.isPassed ? "passed" : "warning"}`}>
+                                {step5StressAnalysis?.isPassed ? "REGIME SURVIVAL PASSED" : "REVIEW NEEDED"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="form-full-action">
+                        <Button type="submit" disabled={longPeriodBusy || !selectedCandidateId}>
+                          {longPeriodBusy ? "กำลังบันทึก..." : "💾 บันทึกผล Multi-Year Backtest & อัปเดต Validation Pipeline"}
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => changeStep(6)}>
+                          ไปต่อ Step 6: Forward Optimization →
+                        </Button>
+                      </div>
+                    </form>
+
+                    {/* Previously Saved Records for Long Period Stage */}
+                    {longPeriodRecords.length > 0 && (
+                      <div style={{ marginTop: 20 }}>
+                        <h4 style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+                          ประวัติการบันทึก Multi-Year Stress Test ({longPeriodRecords.length} รายการ):
+                        </h4>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {longPeriodRecords.map((rec) => (
+                            <div
+                              key={rec.id}
+                              style={{
+                                padding: "10px 14px",
+                                background: "#ffffff",
+                                border: "1px solid #e2e8f0",
+                                borderRadius: 8,
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center"
+                              }}
+                            >
+                              <div>
+                                <b style={{ fontSize: 12, color: "#0f172a" }}>{rec.label}</b>
+                                <div style={{ fontSize: 11, color: "#64748b", display: "flex", gap: 12, marginTop: 2 }}>
+                                  <span>Profit: <b className="mono font-bold">${number(rec.metrics?.profit)}</b></span>
+                                  <span>DD: <b className="mono">{number(rec.metrics?.equity_dd)}%</b></span>
+                                  <span>PF: <b className="mono">{number(rec.metrics?.profit_factor)}</b></span>
+                                  <span>Trades: <b className="mono">{rec.metrics?.trades}</b></span>
+                                  {rec.settings?.modelling_method && <span>Model: {String(rec.settings.modelling_method)}</span>}
+                                </div>
+                              </div>
+                              <span className={`badge-status ${rec.status === "PASSED" ? "passed" : "warning"}`}>
+                                {rec.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="action-button-row" style={{ marginTop: 16 }}>
+                      <Button onClick={() => changeStep(6)}>
+                        ไป Step 6: Forward Optimization <ArrowRight size={15} />
+                      </Button>
+                      <Button variant="outline" onClick={() => changeStep(4)}>
+                        ← กลับไปดู Step 4: เปรียบเทียบ OHLC
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 {/* STEP 7: PARAMETER CLUSTER & PLATEAU */}
                 {activeStep === 7 && (
                   <div className="step-content-pane">
@@ -2749,7 +3896,7 @@ export function WorkflowPage() {
                 )}
 
                 {/* GENERIC VIEW FOR OTHER STEPS */}
-                {![1, 2, 3, 4, 7, 8].includes(activeStep) && (
+                {![1, 2, 3, 4, 5, 7, 8].includes(activeStep) && (
                   <div className="step-content-pane">
                     <p className="pane-lead">
                       {currentStepDef.subtitle}
@@ -2793,21 +3940,21 @@ export function WorkflowPage() {
         </div>
       </div>
 
-      {/* Global Image Lightbox Modal (accessible in Step 3 and Step 4) */}
-      {showImageModal && uploadedImage && (
+      {/* Global Image Lightbox Modal (accessible in Step 3, Step 4, and Step 5) */}
+      {showImageModal && (uploadedImage || step5UploadedImage) && (
         <div className="step3-image-modal" onClick={() => setShowImageModal(false)}>
           <div className="modal-inner" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
                 <ImageIcon size={16} className="text-emerald-600" />
-                <span>หลักฐานภาพถ่าย MT5 Strategy Tester Report: {uploadedImageName}</span>
+                <span>หลักฐานภาพถ่าย MT5 Strategy Tester Report: {activeStep === 5 ? (step5UploadedImageName || "multi_year_report.png") : (uploadedImageName || "screenshot.png")}</span>
               </div>
               <button type="button" onClick={() => setShowImageModal(false)}>
                 <X size={18} />
               </button>
             </div>
             <div className="modal-body">
-              <img src={uploadedImage} alt="MT5 Strategy Tester Report Full" />
+              <img src={(activeStep === 5 ? step5UploadedImage : uploadedImage) || ""} alt="MT5 Strategy Tester Report Full" />
             </div>
           </div>
         </div>

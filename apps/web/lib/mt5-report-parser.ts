@@ -8,6 +8,8 @@ export interface ParsedMT5Report {
   equity_dd: number | null;
   profit_factor: number | null;
   trades: number | null;
+  period_from?: string | null;
+  period_to?: string | null;
   expected_payoff?: number | null;
   recovery_factor?: number | null;
   sharpe?: number | null;
@@ -97,6 +99,15 @@ export function parseMT5ReportText(text: string): ParsedMT5Report {
       result.trades = Math.round(num);
       result.raw_matches.trades = String(result.trades);
     }
+  }
+
+  // 5. Period Date Range
+  // Examples: "Period: 2021.01.01 - 2024.10.01", "2021/01/01 to 2024/10/01"
+  const periodMatch = text.match(/(?:Period[\s:=]*)?(\d{4})[./-](\d{2})[./-](\d{2})\s*(?:-|to)\s*(\d{4})[./-](\d{2})[./-](\d{2})/i);
+  if (periodMatch) {
+    result.period_from = `${periodMatch[1]}-${periodMatch[2]}-${periodMatch[3]}`;
+    result.period_to = `${periodMatch[4]}-${periodMatch[5]}-${periodMatch[6]}`;
+    result.raw_matches.period = `${result.period_from} to ${result.period_to}`;
   }
 
   // Extra Metrics
