@@ -1220,37 +1220,59 @@ export function WorkflowPage() {
                                 </div>
                               </div>
 
-                              {/* Quick Sort Pills */}
+                              {/* Quick Sort & Objective Ranking Pills */}
                               <div className="quick-sort-row">
-                                <span className="quick-sort-label">เรียงลำดับด่วน:</span>
+                                <span className="quick-sort-label">คัดเลือก & จัดอันดับตัวท็อป:</span>
                                 <div className="quick-sort-pills">
                                   <button
                                     type="button"
-                                    className={`sort-pill ${sortField === "rank" && sortOrder === "asc" ? "active" : ""}`}
-                                    onClick={() => { setSortField("rank"); setSortOrder("asc"); }}
+                                    className={`sort-pill ${rankingObjective === "quant_robustness" && sortField !== "profit" && sortField !== "trades" ? "active" : ""}`}
+                                    disabled={discoveryBusy}
+                                    onClick={() => {
+                                      setSortField("rank");
+                                      setSortOrder("asc");
+                                      if (rankingObjective !== "quant_robustness") {
+                                        runQuickDiscovery(discoveryCount, policyMaxDD, "quant_robustness");
+                                      }
+                                    }}
                                   >
-                                    ลำดับเดิม (Rank #)
+                                    🛡️ Quant เสถียรภาพ (PF สูงสุด)
                                   </button>
                                   <button
                                     type="button"
-                                    className={`sort-pill ${sortField === "profitFactor" && sortOrder === "desc" ? "active" : ""}`}
-                                    onClick={() => { setSortField("profitFactor"); setSortOrder("desc"); }}
+                                    className={`sort-pill ${rankingObjective === "max_profit" || sortField === "profit" ? "active" : ""}`}
+                                    disabled={discoveryBusy}
+                                    onClick={() => {
+                                      setSortField("profit");
+                                      setSortOrder("desc");
+                                      runQuickDiscovery(discoveryCount, policyMaxDD, "max_profit");
+                                    }}
                                   >
-                                    Profit Factor สูงสุด ↓
+                                    💰 Net Profit สูงสุด ↓ (ชุดในภาพ MT5 ⭐)
                                   </button>
                                   <button
                                     type="button"
-                                    className={`sort-pill ${sortField === "equityDd" && sortOrder === "asc" ? "active" : ""}`}
-                                    onClick={() => { setSortField("equityDd"); setSortOrder("asc"); }}
+                                    className={`sort-pill ${rankingObjective === "min_dd" || sortField === "equityDd" ? "active" : ""}`}
+                                    disabled={discoveryBusy}
+                                    onClick={() => {
+                                      setSortField("equityDd");
+                                      setSortOrder("asc");
+                                      runQuickDiscovery(discoveryCount, policyMaxDD, "min_dd");
+                                    }}
                                   >
-                                    Drawdown ต่ำสุด ↑
+                                    🦺 Drawdown ต่ำสุด ↑
                                   </button>
                                   <button
                                     type="button"
-                                    className={`sort-pill ${sortField === "profit" && sortOrder === "desc" ? "active" : ""}`}
-                                    onClick={() => { setSortField("profit"); setSortOrder("desc"); }}
+                                    className={`sort-pill ${rankingObjective === "mt5_result" ? "active" : ""}`}
+                                    disabled={discoveryBusy}
+                                    onClick={() => {
+                                      setSortField("rank");
+                                      setSortOrder("asc");
+                                      runQuickDiscovery(discoveryCount, policyMaxDD, "mt5_result");
+                                    }}
                                   >
-                                    Net Profit สูงสุด ↓
+                                    ⚡ MT5 Result สูงสุด
                                   </button>
                                   <button
                                     type="button"
