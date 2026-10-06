@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
@@ -38,7 +38,11 @@ import {
   Filter,
   RotateCcw,
   CheckSquare,
-  Square
+  Square,
+  UploadCloud,
+  Sparkles,
+  Eye,
+  FileText
 } from "lucide-react";
 import { api, jsonBody, number } from "@/lib/api";
 import { useApi } from "@/hooks/use-api";
@@ -51,6 +55,7 @@ import {
   formatMT5OptimizationInputs,
   formatSetFileContent
 } from "@/lib/mt5";
+import { parseMT5ReportText, type ParsedMT5Report } from "@/lib/mt5-report-parser";
 import { EquityCurveChart, ParetoFrontierChart, ParameterClusterChart } from "@/components/charts/quant-charts";
 import type { Page, Run, Candidate, CandidateDetail, DiscoveryPreview, Status } from "@/types";
 
@@ -212,6 +217,20 @@ export function WorkflowPage() {
   const [actionSuccess, setActionSuccess] = useState("");
   const [actionError, setActionError] = useState("");
 
+  // Step 3 Smart OCR & Image Evidence states
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [uploadedImageName, setUploadedImageName] = useState<string>("");
+  const [ocrBusy, setOcrBusy] = useState<boolean>(false);
+  const [ocrProgress, setOcrProgress] = useState<number>(0);
+  const [ocrStatusText, setOcrStatusText] = useState<string>("");
+  const [ocrDetected, setOcrDetected] = useState<ParsedMT5Report | null>(null);
+  const [ocrSuccessMessage, setOcrSuccessMessage] = useState<string>("");
+  const [showImageModal, setShowImageModal] = useState<boolean>(false);
+  const [rawPastedText, setRawPastedText] = useState<string>("");
+  const [showTextPasteBox, setShowTextPasteBox] = useState<boolean>(false);
+  const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Data fetching
   const runs = useApi<Page<Run>>("/optimization-runs?page_size=100");
   const candidates = useApi<Page<Candidate>>(
@@ -324,6 +343,175 @@ export function WorkflowPage() {
     }
   }
 
+  // Step 3 Preprocessing & OCR worker
+  async function preprocessAndOCR(imageSrc: string, fileName: string) {
+    setUploadedImage(imageSrc);
+    setUploadedImageName(fileName);
+    setOcrBusy(true);
+    setOcrProgress(15);
+    setOcrStatusText("กำลังปรับแต่งความละเอียดภาพสำหรับอ่านตาราง...");
+    setOcrDetected(null);
+    setOcrSuccessMessage("");
+
+    try {
+      // 1. Offscreen canvas to upscale 2.2x for small MT5 fonts (8pt Tahoma)
+      const img = new window.Image();
+      img.crossOrigin = "anonymous";
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Failed to load image"));
+        img.src = imageSrc;
+      });
+
+      setOcrProgress(30);
+      setOcrStatusText("กำลังประมวลผลความคมชัดและอัตราส่วนพิกเซล (2.2x)...");
+
+      const canvas = document.createElement("canvas");
+      const scale = 2.2;
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      }
+
+      setOcrProgress(45);
+      setOcrStatusText("กำลังเริ่มต้น Tesseract OCR Engine...");
+
+      const { createWorker } = await import("tesseract.js");
+      const worker = await createWorker("eng");
+
+      setOcrProgress(65);
+      setOcrStatusText("กำลังสแกนตัวเลข Net Profit, Equity Drawdown, PF, Trades...");
+
+      const ret = await worker.recognize(canvas);
+      await worker.terminate();
+
+      setOcrProgress(90);
+      setOcrStatusText("กำลังแยกแยะค่าสถิติจากตาราง Report...");
+
+      const parsed = parseMT5ReportText(ret.data.text);
+      setOcrDetected(parsed);
+
+      let detectedCount = 0;
+      if (parsed.profit !== null) {
+        setRealTickProfit(String(parsed.profit));
+        detectedCount++;
+      }
+      if (parsed.equity_dd !== null) {
+        setRealTickDD(String(parsed.equity_dd));
+        detectedCount++;
+      }
+      if (parsed.profit_factor !== null) {
+        setRealTickPF(String(parsed.profit_factor));
+        detectedCount++;
+      }
+      if (parsed.trades !== null) {
+        setRealTickTrades(String(parsed.trades));
+        detectedCount++;
+      }
+
+      setOcrProgress(100);
+      if (detectedCount > 0) {
+        setOcrSuccessMessage(`✨ ตรวจพบและกรอกอัตโนมัติแล้ว ${detectedCount}/4 ค่าสำคัญจากภาพสำเร็จ!`);
+      } else {
+        setOcrSuccessMessage("⚠️ อ่านข้อความได้ แต่ไม่พบคีย์เวิร์ดมาตรฐาน MT5 ลองตรวจทานหรือกรอกค่าด้วยตนเอง");
+      }
+    } catch (err) {
+      console.error("OCR Error:", err);
+      setOcrStatusText("เกิดข้อผิดพลาดในการอ่านรูปภาพ");
+      setOcrSuccessMessage("ไม่สามารถอ่านตัวเลขได้โดยอัตโนมัติ กรุณากรอกตัวเลขด้วยตนเอง");
+    } finally {
+      setOcrBusy(false);
+    }
+  }
+
+  function handleImageFile(file: File) {
+    if (!file) return;
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          preprocessAndOCR(e.target.result as string, file.name);
+        }
+      };
+      reader.readAsDataURL(file);
+    } else if (file.name.endsWith(".htm") || file.name.endsWith(".html") || file.name.endsWith(".txt")) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          handleTextReport(e.target.result as string, file.name);
+        }
+      };
+      reader.readAsText(file);
+    }
+  }
+
+  function handleTextReport(text: string, sourceName = "MT5 Report Text") {
+    const parsed = parseMT5ReportText(text);
+    setOcrDetected(parsed);
+    let detectedCount = 0;
+    if (parsed.profit !== null) {
+      setRealTickProfit(String(parsed.profit));
+      detectedCount++;
+    }
+    if (parsed.equity_dd !== null) {
+      setRealTickDD(String(parsed.equity_dd));
+      detectedCount++;
+    }
+    if (parsed.profit_factor !== null) {
+      setRealTickPF(String(parsed.profit_factor));
+      detectedCount++;
+    }
+    if (parsed.trades !== null) {
+      setRealTickTrades(String(parsed.trades));
+      detectedCount++;
+    }
+
+    if (detectedCount > 0) {
+      setOcrSuccessMessage(`✨ ดึงค่าสถิติสำเร็จ ${detectedCount}/4 ค่าจาก ${sourceName}!`);
+      setShowTextPasteBox(false);
+    } else {
+      setOcrSuccessMessage("⚠️ ไม่พบคีย์เวิร์ดของ MT5 ในข้อความที่วาง");
+    }
+  }
+
+  // Global paste handler for Step 3
+  useEffect(() => {
+    function handlePaste(e: ClipboardEvent) {
+      if (activeStep !== 3) return;
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) {
+        return;
+      }
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith("image/")) {
+          const blob = items[i].getAsFile();
+          if (blob) {
+            handleImageFile(blob);
+            e.preventDefault();
+            return;
+          }
+        }
+      }
+
+      const text = e.clipboardData?.getData("text");
+      if (text && (text.includes("Profit") || text.includes("Drawdown") || text.includes("Trades") || text.includes("\t"))) {
+        handleTextReport(text, "Clipboard Text");
+        e.preventDefault();
+      }
+    }
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [activeStep]);
+
   // Record Real Tick validation (Step 3 & 4)
   async function submitRealTickTest(e: React.FormEvent) {
     e.preventDefault();
@@ -344,9 +532,11 @@ export function WorkflowPage() {
           delay_ms: 0,
           modelling_method: "Every tick based on real ticks"
         },
-        notes: "Real tick execution on MetaTrader 5"
+        notes: uploadedImageName
+          ? `Validated with MT5 report screenshot: ${uploadedImageName}`
+          : "Real tick execution on MetaTrader 5"
       }));
-      setActionSuccess("บันทึกผล Every Tick เรียบร้อยแล้ว! ดูการเปรียบเทียบใน Step 4");
+      setActionSuccess("บันทึกผล Every Tick เรียบร้อยแล้ว! นำผลไปเปรียบเทียบใน Step 4...");
       setRevision(r => r + 1);
       setTimeout(() => changeStep(4), 1200);
     } catch (err) {
@@ -391,6 +581,50 @@ export function WorkflowPage() {
     degradation.profitDropPct > -30 &&
     (degradation.ddDiffPp ?? 0) < 5 &&
     (latestRealTick?.metrics.profit_factor ?? 0) >= 1.5;
+
+  // Step 3 Live Degradation calculation (real-time as user types or OCR extracts)
+  const step3LiveAnalysis = useMemo(() => {
+    const p = parseFloat(realTickProfit);
+    const dd = parseFloat(realTickDD);
+    const pf = parseFloat(realTickPF);
+    const tr = parseInt(realTickTrades, 10);
+    const baseP = baseline?.profit ?? null;
+    const baseDD = baseline?.equity_dd ?? null;
+    const basePF = baseline?.profit_factor ?? null;
+    const baseTr = baseline?.trades ?? null;
+
+    const hasData = !isNaN(p) && !isNaN(dd);
+    if (!hasData) return null;
+
+    const profitDiffPct = baseP !== null && baseP !== 0
+      ? ((p - baseP) / Math.abs(baseP)) * 100
+      : null;
+    const ddDiffPp = baseDD !== null
+      ? dd - baseDD
+      : null;
+    const pfDiff = basePF !== null && !isNaN(pf)
+      ? pf - basePF
+      : null;
+    const tradesDiffPct = baseTr !== null && baseTr > 0 && !isNaN(tr)
+      ? ((tr - baseTr) / baseTr) * 100
+      : null;
+
+    const isPassed = profitDiffPct !== null
+      ? profitDiffPct > -30 && (ddDiffPp ?? 0) < 5 && (!isNaN(pf) ? pf >= 1.5 : true)
+      : true;
+
+    return {
+      profit: p,
+      dd,
+      pf: isNaN(pf) ? null : pf,
+      trades: isNaN(tr) ? null : tr,
+      profitDiffPct,
+      ddDiffPp,
+      pfDiff,
+      tradesDiffPct,
+      isPassed
+    };
+  }, [realTickProfit, realTickDD, realTickPF, realTickTrades, baseline]);
 
   // Step 8: Narrow Ranges calculation
   const numericParams = activeCandidate
@@ -1552,13 +1786,254 @@ export function WorkflowPage() {
                 {/* STEP 3: EVERY TICK BASED ON REAL TICKS RECORD */}
                 {activeStep === 3 && (
                   <div className="step-content-pane">
+                    {/* Active Candidate Context Banner */}
+                    {activeCandidate && (
+                      <div className="step3-candidate-banner">
+                        <div className="banner-left">
+                          <span className="banner-tag">🎯 Active Candidate under validation</span>
+                          <span className="banner-title">
+                            <b>{activeCandidate.baseline?.stable_set_id ? `SET-${activeCandidate.baseline.stable_set_id}` : `Candidate #${activeCandidate.id}`}</b>
+                            {activeCandidate.run?.ea_name ? ` (EA: ${activeCandidate.run.ea_name})` : ""}
+                          </span>
+                        </div>
+                        <div className="banner-right">
+                          <span className="baseline-label">Baseline OHLC M1:</span>
+                          <span className="baseline-stat">
+                            Profit: <b>${number(baseline?.profit)}</b>
+                          </span>
+                          <span className="baseline-stat">
+                            DD: <b>{baseline?.equity_dd?.toFixed(2)}%</b>
+                          </span>
+                          <span className="baseline-stat">
+                            PF: <b>{baseline?.profit_factor?.toFixed(2)}</b>
+                          </span>
+                          <span className="baseline-stat">
+                            Trades: <b>{baseline?.trades}</b>
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
                     <p className="pane-lead">
-                      หลังจากรัน Single Backtest (Every tick based on real ticks) ใน MT5 เสร็จแล้ว กรอกสถิติลงที่นี่:
+                      หลังจากรัน Single Backtest (Every tick based on real ticks) ใน MT5 เสร็จแล้ว
+                      อัปโหลดภาพสกรีนช็อตเพื่อให้ระบบอ่านสถิติอัตโนมัติ หรือกรอกตัวเลขโดยตรง:
                     </p>
 
-                    <form onSubmit={submitRealTickTest} className="record-form-grid">
+                    {/* SMART EVIDENCE OCR READER */}
+                    {!uploadedImage ? (
+                      <div className="step3-smart-reader-card">
+                        <div
+                          className={`step3-dropzone ${isDraggingOver ? "dragging" : ""}`}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            setIsDraggingOver(true);
+                          }}
+                          onDragLeave={() => setIsDraggingOver(false)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setIsDraggingOver(false);
+                            const file = e.dataTransfer.files?.[0];
+                            if (file) handleImageFile(file);
+                          }}
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp,.htm,.html,.txt"
+                            style={{ display: "none" }}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleImageFile(file);
+                            }}
+                          />
+                          <div className="dropzone-icon-circle">
+                            <UploadCloud size={28} className="text-emerald-600" />
+                          </div>
+                          <div className="dropzone-content">
+                            <h4>อัปโหลดภาพผลทดสอบ หรือวางภาพสกรีนช็อต (Smart OCR Auto-Fill)</h4>
+                            <p>
+                              ลากไฟล์ภาพสกรีนช็อต MT5 Backtest หรือกดเลือกไฟล์ (รองรับ PNG, JPG, WebP, HTML/Text Report)
+                            </p>
+                            <div className="dropzone-actions">
+                              <Button
+                                size="sm"
+                                type="button"
+                                variant="default"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  fileInputRef.current?.click();
+                                }}
+                              >
+                                <UploadCloud size={14} /> เลือกไฟล์รูปภาพ
+                              </Button>
+                              <span className="paste-hint-pill">⚡ กด Ctrl + V วางภาพได้ทันที</span>
+                              <Button
+                                size="sm"
+                                type="button"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowTextPasteBox(prev => !prev);
+                                }}
+                              >
+                                <FileText size={14} /> วางข้อความ Report / HTML
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {ocrBusy && (
+                          <div style={{ marginTop: 12 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4, fontWeight: 600, color: "#065f46" }}>
+                              <span>{ocrStatusText}</span>
+                              <span>{ocrProgress}%</span>
+                            </div>
+                            <div style={{ width: "100%", height: 6, background: "#e2e8f0", borderRadius: 3, overflow: "hidden" }}>
+                              <div
+                                style={{
+                                  width: `${ocrProgress}%`,
+                                  height: "100%",
+                                  background: "linear-gradient(90deg, #059669, #10b981)",
+                                  transition: "width 0.3s ease"
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {showTextPasteBox && (
+                          <div className="text-paste-box">
+                            <label>วางข้อความตารางสถิติ หรือโค้ด HTML ที่คัดลอกจาก MT5 Strategy Tester Report:</label>
+                            <textarea
+                              rows={4}
+                              placeholder="วางตารางสถิติ หรือ Report HTML จาก MT5 ที่นี่..."
+                              value={rawPastedText}
+                              onChange={(e) => setRawPastedText(e.target.value)}
+                            />
+                            <div className="text-paste-actions">
+                              <Button
+                                size="sm"
+                                type="button"
+                                onClick={() => handleTextReport(rawPastedText, "Pasted Text")}
+                                disabled={!rawPastedText.trim()}
+                              >
+                                <Sparkles size={14} /> ดึงค่าสถิติอัตโนมัติ
+                              </Button>
+                              <Button
+                                size="sm"
+                                type="button"
+                                variant="ghost"
+                                onClick={() => setShowTextPasteBox(false)}
+                              >
+                                ยกเลิก
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="step3-smart-reader-card">
+                        <div className="step3-image-preview-card">
+                          <div className="preview-image-side">
+                            <div className="preview-thumb-box" onClick={() => setShowImageModal(true)}>
+                              <img src={uploadedImage} alt="MT5 Backtest Screenshot" className="preview-thumb-img" />
+                              <div className="thumb-zoom-overlay">
+                                <Eye size={16} /> ดูรูปขนาดเต็ม
+                              </div>
+                            </div>
+                            <div className="thumb-meta-row">
+                              <span className="file-name-tag" title={uploadedImageName}>
+                                <ImageIcon size={13} /> {uploadedImageName || "screenshot.png"}
+                              </span>
+                              <button
+                                type="button"
+                                className="change-img-btn"
+                                onClick={() => {
+                                  setUploadedImage(null);
+                                  setOcrDetected(null);
+                                  setOcrSuccessMessage("");
+                                }}
+                              >
+                                เปลี่ยนภาพ
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="preview-detected-side">
+                            <div className="detected-header">
+                              <span className="detected-title">
+                                <Sparkles size={15} className="text-emerald-600" />
+                                <b>ผลการอ่านสถิติด้วย Smart OCR:</b>
+                              </span>
+                              {ocrBusy ? (
+                                <span className="ocr-busy-tag">
+                                  <RefreshCw size={13} className="spin" /> {ocrStatusText} ({ocrProgress}%)
+                                </span>
+                              ) : ocrSuccessMessage ? (
+                                <span className="ocr-status-pill">{ocrSuccessMessage}</span>
+                              ) : null}
+                            </div>
+
+                            <div className="detected-chips-grid">
+                              <div className={`detected-chip ${ocrDetected?.profit !== null && ocrDetected?.profit !== undefined ? "found" : ""}`}>
+                                <span className="chip-label">Total Net Profit</span>
+                                <span className="chip-val">
+                                  {ocrDetected?.profit !== null && ocrDetected?.profit !== undefined ? `$${number(ocrDetected.profit)}` : "—"}
+                                </span>
+                              </div>
+
+                              <div className={`detected-chip ${ocrDetected?.equity_dd !== null && ocrDetected?.equity_dd !== undefined ? "found" : ""}`}>
+                                <span className="chip-label">Equity Drawdown</span>
+                                <span className="chip-val">
+                                  {ocrDetected?.equity_dd !== null && ocrDetected?.equity_dd !== undefined ? `${ocrDetected.equity_dd.toFixed(2)}%` : "—"}
+                                </span>
+                              </div>
+
+                              <div className={`detected-chip ${ocrDetected?.profit_factor !== null && ocrDetected?.profit_factor !== undefined ? "found" : ""}`}>
+                                <span className="chip-label">Profit Factor</span>
+                                <span className="chip-val">
+                                  {ocrDetected?.profit_factor !== null && ocrDetected?.profit_factor !== undefined ? ocrDetected.profit_factor.toFixed(2) : "—"}
+                                </span>
+                              </div>
+
+                              <div className={`detected-chip ${ocrDetected?.trades !== null && ocrDetected?.trades !== undefined ? "found" : ""}`}>
+                                <span className="chip-label">Total Trades</span>
+                                <span className="chip-val">
+                                  {ocrDetected?.trades !== null && ocrDetected?.trades !== undefined ? ocrDetected.trades : "—"}
+                                </span>
+                              </div>
+                            </div>
+
+                            {(ocrDetected?.recovery_factor || ocrDetected?.sharpe || ocrDetected?.expected_payoff || ocrDetected?.deposit) && (
+                              <div className="detected-extra-row">
+                                {ocrDetected?.expected_payoff != null && (
+                                  <span className="extra-stat">Expected Payoff: <b>{ocrDetected.expected_payoff}</b></span>
+                                )}
+                                {ocrDetected?.recovery_factor != null && (
+                                  <span className="extra-stat">Recovery Factor: <b>{ocrDetected.recovery_factor}</b></span>
+                                )}
+                                {ocrDetected?.sharpe != null && (
+                                  <span className="extra-stat">Sharpe Ratio: <b>{ocrDetected.sharpe}</b></span>
+                                )}
+                                {ocrDetected?.deposit != null && (
+                                  <span className="extra-stat">Deposit: <b>${number(ocrDetected.deposit)}</b></span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <form onSubmit={submitRealTickTest} className="record-form-grid" style={{ marginTop: 14 }}>
                       <div className="form-group">
-                        <label>Net Profit ($)</label>
+                        <label>
+                          Net Profit ($)
+                          {ocrDetected?.profit !== null && ocrDetected?.profit !== undefined && (
+                            <span className="input-detect-badge">✨ Auto-filled</span>
+                          )}
+                        </label>
                         <input
                           required
                           type="number"
@@ -1570,7 +2045,12 @@ export function WorkflowPage() {
                       </div>
 
                       <div className="form-group">
-                        <label>Equity Drawdown (%)</label>
+                        <label>
+                          Equity Drawdown (%)
+                          {ocrDetected?.equity_dd !== null && ocrDetected?.equity_dd !== undefined && (
+                            <span className="input-detect-badge">✨ Auto-filled</span>
+                          )}
+                        </label>
                         <input
                           required
                           type="number"
@@ -1582,7 +2062,12 @@ export function WorkflowPage() {
                       </div>
 
                       <div className="form-group">
-                        <label>Profit Factor</label>
+                        <label>
+                          Profit Factor
+                          {ocrDetected?.profit_factor !== null && ocrDetected?.profit_factor !== undefined && (
+                            <span className="input-detect-badge">✨ Auto-filled</span>
+                          )}
+                        </label>
                         <input
                           required
                           type="number"
@@ -1594,7 +2079,12 @@ export function WorkflowPage() {
                       </div>
 
                       <div className="form-group">
-                        <label>Total Trades</label>
+                        <label>
+                          Total Trades
+                          {ocrDetected?.trades !== null && ocrDetected?.trades !== undefined && (
+                            <span className="input-detect-badge">✨ Auto-filled</span>
+                          )}
+                        </label>
                         <input
                           required
                           type="number"
@@ -1605,6 +2095,92 @@ export function WorkflowPage() {
                         />
                       </div>
 
+                      {/* Live Degradation Analysis Card */}
+                      {step3LiveAnalysis && (
+                        <div
+                          className={`step3-live-analysis-card ${step3LiveAnalysis.isPassed ? "passed" : "warning"}`}
+                          style={{ gridColumn: "span 2" }}
+                        >
+                          <div className="analysis-header">
+                            <span className="analysis-title">
+                              <TrendingUp size={16} className={step3LiveAnalysis.isPassed ? "text-emerald-600" : "text-amber-600"} />
+                              <b>การประเมิน Degradation แบบ Real-time (Every Tick vs Baseline OHLC M1)</b>
+                            </span>
+                            <span
+                              className={`plateau-verdict-badge ${step3LiveAnalysis.isPassed ? "" : "warning"}`}
+                              style={{
+                                background: step3LiveAnalysis.isPassed ? "#ecfdf5" : "#fffbeb",
+                                color: step3LiveAnalysis.isPassed ? "#047857" : "#b45309",
+                                borderColor: step3LiveAnalysis.isPassed ? "#a7f3d0" : "#fde68a"
+                              }}
+                            >
+                              {step3LiveAnalysis.isPassed ? "🟢 ผ่านเกณฑ์ความทนทาน (Low Degradation)" : "⚠️ มี Degradation สูงกว่าเกณฑ์"}
+                            </span>
+                          </div>
+
+                          <div className="analysis-grid">
+                            <div className="analysis-stat">
+                              <span className="lbl">Profit Change</span>
+                              <span
+                                className="val"
+                                style={{
+                                  color: (step3LiveAnalysis.profitDiffPct ?? 0) >= 0 ? "#059669" : (step3LiveAnalysis.profitDiffPct ?? 0) > -30 ? "#b45309" : "#dc2626"
+                                }}
+                              >
+                                {step3LiveAnalysis.profitDiffPct !== null
+                                  ? `${step3LiveAnalysis.profitDiffPct >= 0 ? "+" : ""}${step3LiveAnalysis.profitDiffPct.toFixed(1)}%`
+                                  : "—"}
+                              </span>
+                              <span className="sub">
+                                Baseline: ${number(baseline?.profit)} → Real: ${number(step3LiveAnalysis.profit)}
+                              </span>
+                            </div>
+
+                            <div className="analysis-stat">
+                              <span className="lbl">Drawdown Change</span>
+                              <span
+                                className="val"
+                                style={{
+                                  color: (step3LiveAnalysis.ddDiffPp ?? 0) <= 0 ? "#059669" : (step3LiveAnalysis.ddDiffPp ?? 0) < 5 ? "#b45309" : "#dc2626"
+                                }}
+                              >
+                                {step3LiveAnalysis.ddDiffPp !== null
+                                  ? `${step3LiveAnalysis.ddDiffPp >= 0 ? "+" : ""}${step3LiveAnalysis.ddDiffPp.toFixed(2)} pp`
+                                  : "—"}
+                              </span>
+                              <span className="sub">
+                                Baseline: {baseline?.equity_dd?.toFixed(2)}% → Real: {step3LiveAnalysis.dd.toFixed(2)}%
+                              </span>
+                            </div>
+
+                            <div className="analysis-stat">
+                              <span className="lbl">Profit Factor</span>
+                              <span
+                                className="val"
+                                style={{
+                                  color: (step3LiveAnalysis.pf ?? 0) >= 2.0 ? "#059669" : (step3LiveAnalysis.pf ?? 0) >= 1.5 ? "#b45309" : "#dc2626"
+                                }}
+                              >
+                                {step3LiveAnalysis.pf !== null ? step3LiveAnalysis.pf.toFixed(2) : "—"}
+                              </span>
+                              <span className="sub">
+                                Baseline: {baseline?.profit_factor?.toFixed(2) ?? "—"} (Delta: {step3LiveAnalysis.pfDiff != null ? `${step3LiveAnalysis.pfDiff >= 0 ? "+" : ""}${step3LiveAnalysis.pfDiff.toFixed(2)}` : "—"})
+                              </span>
+                            </div>
+
+                            <div className="analysis-stat">
+                              <span className="lbl">Total Trades</span>
+                              <span className="val" style={{ color: "#0f172a" }}>
+                                {step3LiveAnalysis.trades !== null ? step3LiveAnalysis.trades : "—"}
+                              </span>
+                              <span className="sub">
+                                Baseline: {baseline?.trades ?? "—"} ({step3LiveAnalysis.tradesDiffPct != null ? `${step3LiveAnalysis.tradesDiffPct >= 0 ? "+" : ""}${step3LiveAnalysis.tradesDiffPct.toFixed(0)}%` : "—"})
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="form-full-action">
                         <Button type="submit" disabled={recordBusy || !selectedCandidateId}>
                           {recordBusy ? "กำลังบันทึก..." : "💾 บันทึกผล Real Tick & คำนวณ Degradation"}
@@ -1614,6 +2190,26 @@ export function WorkflowPage() {
                         </Button>
                       </div>
                     </form>
+
+                    {/* Image Lightbox Modal */}
+                    {showImageModal && uploadedImage && (
+                      <div className="step3-image-modal" onClick={() => setShowImageModal(false)}>
+                        <div className="modal-inner" onClick={e => e.stopPropagation()}>
+                          <div className="modal-header">
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+                              <ImageIcon size={16} className="text-emerald-600" />
+                              <span>หลักฐานภาพถ่าย MT5 Strategy Tester Backtest: {uploadedImageName}</span>
+                            </div>
+                            <button type="button" onClick={() => setShowImageModal(false)}>
+                              <X size={18} />
+                            </button>
+                          </div>
+                          <div className="modal-body">
+                            <img src={uploadedImage} alt="MT5 Strategy Tester Report Full" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

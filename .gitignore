@@ -16,3 +16,4 @@ logs/
 .pnpm-store/
 .DS_Store
 dist/
+*.traineddata
